@@ -1,36 +1,151 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BlueBeam Prototype
+
+A Bluebeam-like PDF annotation and collaboration tool built with Next.js, React, and TypeScript.
+
+## Features
+
+- **PDF Viewing**: View PDF documents with zoom, rotation, and page navigation
+- **Annotation Tools**: Create highlights, text annotations, shapes, measurements, and more
+- **Document Management**: Upload, organize, and manage PDF documents
+- **Collaboration**: Share annotations and collaborate on documents
+- **Modern UI**: Clean, professional interface inspired by Bluebeam Revu
+
+## Tech Stack
+
+- **Framework**: Next.js 15 with App Router
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **PDF Handling**: react-pdf with PDF.js
+- **UI Components**: Custom components with Lucide React icons
+- **State Management**: React hooks and context
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
+- Node.js 18+ 
+- npm or yarn
+
+### Installation
+
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <repository-url>
+cd blue-beam-prototype
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Run the development server:
+```bash
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Open [http://localhost:3000](http://localhost:3000) in your browser
 
-## Learn More
+## Project Structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+├── app/                 # Next.js app router pages
+│   ├── layout.tsx      # Root layout
+│   ├── page.tsx        # Main application page
+│   └── globals.css     # Global styles
+├── components/         # React components
+│   ├── Toolbar.tsx     # Main toolbar with annotation tools
+│   ├── DocumentList.tsx # Document sidebar
+│   ├── PDFViewer.tsx   # PDF viewing component
+│   └── AnnotationPanel.tsx # Annotation management panel
+├── types/              # TypeScript type definitions
+│   └── pdf.ts          # PDF and annotation types
+└── utils/              # Utility functions
+    ├── cn.ts           # Class name utility
+    └── currencyFormatter.ts # Currency formatting
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Key Components
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Toolbar
+- File operations (upload, download, save)
+- Edit operations (undo, redo)
+- View controls (zoom, rotate)
+- Annotation tools (highlight, text, shapes, etc.)
 
-## Deploy on Vercel
+### DocumentList
+- Browse and select documents
+- Document metadata display
+- Upload functionality
+- Document organization
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### PDFViewer
+- PDF rendering with react-pdf
+- Annotation overlay system
+- Zoom and rotation controls
+- Page navigation
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### AnnotationPanel
+- List and manage annotations
+- Search and filter annotations
+- Annotation editing and deletion
+- User attribution
+
+## Annotation Types
+
+- **Highlight**: Text highlighting with color options
+- **Text**: Text boxes with customizable styling
+- **Sticky Notes**: Pop-up note annotations
+- **Shapes**: Rectangles, circles, lines, arrows
+- **Measurements**: Dimension and measurement tools
+- **Cloud**: Cloud markup for revisions
+- **Freehand**: Free-form drawing
+
+## Customization
+
+The application uses CSS custom properties for theming. You can customize colors by modifying the variables in `globals.css`:
+
+```css
+:root {
+  --primary: #0066cc;
+  --secondary: #f5f5f5;
+  --accent: #4a90e2;
+  /* ... other color variables */
+}
+```
+
+## Development
+
+### Adding New Annotation Types
+
+1. Add the new type to `AnnotationType` in `types/pdf.ts`
+2. Add the tool to the tools array in `Toolbar.tsx`
+3. Implement the annotation rendering in `PDFViewer.tsx`
+4. Add styling for the annotation type in `globals.css`
+
+### Extending Functionality
+
+- **Collaboration**: Add real-time updates with WebSocket or Server-Sent Events
+- **Storage**: Integrate with cloud storage providers (AWS S3, Google Drive)
+- **Authentication**: Add user authentication and authorization
+- **Export**: Add PDF export with annotations embedded
+
+## License
+
+This project is for demonstration purposes. Please ensure you have proper licenses for any commercial use.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+## Acknowledgments
+
+- Inspired by Bluebeam Revu
+- Built with modern web technologies
+- Uses PDF.js for PDF rendering
+- Icons from Lucide React

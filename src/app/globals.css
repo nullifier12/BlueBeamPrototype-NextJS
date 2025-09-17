@@ -1,26 +1,255 @@
 @import "tailwindcss";
 
 :root {
+  /* Bluebeam-inspired color scheme */
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #1a1a1a;
+  --primary: #0066cc;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #1a1a1a;
+  --accent: #4a90e2;
+  --accent-foreground: #ffffff;
+  --muted: #f8f9fa;
+  --muted-foreground: #6c757d;
+  --border: #e1e5e9;
+  --input: #ffffff;
+  --ring: #0066cc;
+  --destructive: #dc3545;
+  --destructive-foreground: #ffffff;
+  --success: #28a745;
+  --warning: #ffc107;
+  --info: #17a2b8;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0d1117;
+    --foreground: #f0f6fc;
+    --primary: #1f6feb;
+    --primary-foreground: #ffffff;
+    --secondary: #21262d;
+    --secondary-foreground: #f0f6fc;
+    --accent: #388bfd;
+    --accent-foreground: #ffffff;
+    --muted: #161b22;
+    --muted-foreground: #8b949e;
+    --border: #30363d;
+    --input: #0d1117;
+    --ring: #1f6feb;
+    --destructive: #da3633;
+    --destructive-foreground: #ffffff;
+    --success: #238636;
+    --warning: #d29922;
+    --info: #0969da;
   }
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--muted);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* PDF viewer specific styles */
+.pdf-viewer-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
+  /* Force scrollbars to always be visible when content overflows */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) var(--muted);
+  /* Ensure container doesn't expand beyond its bounds */
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Ensure scrollbars are visible on webkit browsers */
+.pdf-viewer-container::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.pdf-viewer-container::-webkit-scrollbar-track {
+  background: var(--muted);
+  border-radius: 6px;
+}
+
+.pdf-viewer-container::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+  border: 2px solid var(--muted);
+}
+
+.pdf-viewer-container::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+.pdf-viewer-container::-webkit-scrollbar-corner {
+  background: var(--muted);
+}
+
+/* Force horizontal scrollbar to be visible when content overflows */
+.pdf-viewer-container[style*="overflow-x: auto"],
+.pdf-viewer-container[style*="overflow-x: scroll"] {
+  overflow-x: scroll !important;
+}
+
+/* Ensure horizontal scrollbar appears when zoom > 100% */
+@media (min-width: 1px) {
+  .pdf-viewer-container {
+    overflow-x: auto;
+  }
+}
+
+.pdf-page {
+  margin: 0 auto 1rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border);
+}
+
+/* Annotation styles */
+.annotation {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.annotation.highlight {
+  background-color: rgba(255, 255, 0, 0.3);
+}
+
+.annotation.text {
+  background-color: transparent;
+  border: 2px solid var(--primary);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--foreground);
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.annotation.sticky-note {
+  width: 20px;
+  height: 20px;
+  background-color: var(--warning);
+  border-radius: 2px;
+  position: relative;
+}
+
+.annotation.sticky-note::after {
+  content: '';
+  position: absolute;
+  top: 20px;
+  left: 0;
+  width: 0;
+  height: 0;
+  border-left: 10px solid var(--warning);
+  border-right: 10px solid transparent;
+  border-top: 10px solid transparent;
+}
+
+/* Toolbar styles */
+.toolbar {
+  background: var(--secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toolbar-button {
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.toolbar-button:hover {
+  background: var(--muted);
+}
+
+.toolbar-button.active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+
+/* Sidebar styles */
+.sidebar {
+  background: var(--secondary);
+  border-right: 1px solid var(--border);
+  width: 300px;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+/* Status bar styles */
+.status-bar {
+  background: var(--secondary);
+  border-top: 1px solid var(--border);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
