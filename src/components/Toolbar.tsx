@@ -26,7 +26,8 @@ import {
   CircleDot,
   Minus,
   FileDown,
-  FileUp
+  FileUp,
+  CurlyBraces
 } from 'lucide-react';
 import { Tool, AnnotationType } from '@/types';
 import { cn } from '@/utils/cn';
@@ -58,6 +59,7 @@ const tools: Tool[] = [
   { id: 'arrow', name: 'Arrow', icon: 'arrow-right', type: 'arrow', shortcut: 'A', isActive: false },
   { id: 'measurement', name: 'Measurement', icon: 'ruler', type: 'measurement', shortcut: 'M', isActive: false },
   { id: 'calibrate', name: 'Calibrate', icon: 'target', type: 'calibrate', shortcut: 'K', isActive: false },
+  { id: 'arc', name: 'Arc', icon: 'curly-braces', type: 'arc', shortcut: 'G', isActive: false },
   { id: 'cloud', name: 'Cloud', icon: 'cloud', type: 'cloud', shortcut: 'D', isActive: false },
   { id: 'freehand', name: 'Freehand', icon: 'pen-tool', type: 'freehand', shortcut: 'F', isActive: false },
 ];
@@ -75,6 +77,7 @@ const getIcon = (iconName: string, size: number = 16) => {
     'minus': Minus,
     'ruler': Ruler,
     'target': Target,
+    'curly-braces': CurlyBraces,
     'cloud': Cloud,
     'pen-tool': PenTool,
   };

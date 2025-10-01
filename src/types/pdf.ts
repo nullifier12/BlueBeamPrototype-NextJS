@@ -46,6 +46,14 @@ export interface Position {
   width?: number;
   height?: number;
   points?: Array<{ x: number; y: number }>;
+  // Arc-specific properties (my-app format)
+  pathData?: string;
+  center?: { x: number; y: number };
+  startPoint?: { x: number; y: number };
+  endPoint?: { x: number; y: number };
+  radius?: number;
+  startAngle?: number;
+  endAngle?: number;
 }
 
 export interface AnnotationStyle {

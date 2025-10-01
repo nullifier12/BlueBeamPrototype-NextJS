@@ -39,6 +39,13 @@ export default function PDFViewer({
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Arc drawing state
+  const [arcStartPoint, setArcStartPoint] = useState<{ x: number; y: number } | null>(null);
+  const [arcCenter, setArcCenter] = useState<{ x: number; y: number } | null>(null);
+  const [isDrawingArc, setIsDrawingArc] = useState(false);
+  const [arcPhase, setArcPhase] = useState<'start' | 'center' | 'end'>('start');
+  const [isPointerDown, setIsPointerDown] = useState(false);
   const [pdfDoc, setPdfDoc] = useState<
     typeof window.pdfjsLib.PDFDocumentProxy | null
   >(null);
@@ -349,6 +356,59 @@ export default function PDFViewer({
           highlight.setAttribute("fill", "rgba(255, 255, 0, 0.3)");
           highlight.setAttribute("stroke", "none");
           return highlight;
+
+        case "arc":
+          // Arc annotations (from my-app implementation)
+          console.log("🎨 Rendering arc annotation:", annotation);
+          const path = document.createElementNS(svgNS, "path");
+          if (annotation.position.points && annotation.position.points.length >= 3) {
+            const [startPoint, center, endPoint] = annotation.position.points;
+            console.log("🎨 Arc points:", { startPoint, center, endPoint, scale });
+            
+            // Scale coordinates for current zoom
+            const scaledStart = {
+              x: startPoint.x * scale,
+              y: startPoint.y * scale
+            };
+            const scaledCenter = {
+              x: center.x * scale,
+              y: center.y * scale
+            };
+            const scaledEnd = {
+              x: endPoint.x * scale,
+              y: endPoint.y * scale
+            };
+            
+            // Calculate radius from center to start point
+            const radius = Math.sqrt(
+              Math.pow(scaledCenter.x - scaledStart.x, 2) + 
+              Math.pow(scaledCenter.y - scaledStart.y, 2)
+            );
+            
+            const startAngle = Math.atan2(scaledStart.y - scaledCenter.y, scaledStart.x - scaledCenter.x);
+            const endAngle = Math.atan2(scaledEnd.y - scaledCenter.y, scaledEnd.x - scaledCenter.x);
+            
+            let angleDiff = endAngle - startAngle;
+            while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+            while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+            
+            const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
+            const sweepFlag = angleDiff > 0 ? 1 : 0;
+            
+            const arcPath = `M ${scaledStart.x} ${scaledStart.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${scaledEnd.x} ${scaledEnd.y}`;
+            console.log("🎨 Arc path:", arcPath);
+            path.setAttribute("d", arcPath);
+          } else {
+            // Fallback for old arc annotations
+            console.log("🎨 Using fallback arc path");
+            const arcPath = `M ${x} ${y} A ${width} ${height} 0 0 1 ${x + width} ${y + height}`;
+            path.setAttribute("d", arcPath);
+          }
+          path.setAttribute("stroke", "#0b74de");
+          path.setAttribute("stroke-width", "2");
+          path.setAttribute("fill", "none");
+          console.log("🎨 Arc path element created:", path);
+          return path;
 
         default:
           return null;
@@ -694,6 +754,117 @@ export default function PDFViewer({
     }
   }, [viewport.zoom, pdfDoc, redrawAnnotations, annotations.length]);
 
+  // Show arc drawing indicators (AutoCAD style)
+  useEffect(() => {
+    if (isDrawingArc && svgOverlayRef.current) {
+      // Clear existing temporary elements
+      const existingTemp = svgOverlayRef.current.querySelectorAll('.temp-arc-element');
+      existingTemp.forEach(el => svgOverlayRef.current?.removeChild(el));
+
+      if (arcStartPoint) {
+        const scale = viewport.zoom;
+        const screenStartPoint = {
+          x: arcStartPoint.x * scale,
+          y: arcStartPoint.y * scale
+        };
+
+        // Draw start point indicator (AutoCAD style - small filled circle)
+        const startCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        startCircle.setAttribute('cx', screenStartPoint.x.toString());
+        startCircle.setAttribute('cy', screenStartPoint.y.toString());
+        startCircle.setAttribute('r', '3');
+        startCircle.setAttribute('fill', '#ff0000'); // Red like AutoCAD
+        startCircle.setAttribute('stroke', '#ffffff');
+        startCircle.setAttribute('stroke-width', '1');
+        startCircle.classList.add('temp-arc-element');
+        svgOverlayRef.current.appendChild(startCircle);
+
+        // Add start point label
+        const startLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        startLabel.setAttribute('x', (screenStartPoint.x + 8).toString());
+        startLabel.setAttribute('y', (screenStartPoint.y - 8).toString());
+        startLabel.setAttribute('fill', '#ff0000');
+        startLabel.setAttribute('font-size', '12');
+        startLabel.setAttribute('font-family', 'Arial, sans-serif');
+        startLabel.textContent = 'Start';
+        startLabel.classList.add('temp-arc-element');
+        svgOverlayRef.current.appendChild(startLabel);
+
+        if (arcCenter) {
+          const screenCenter = {
+            x: arcCenter.x * scale,
+            y: arcCenter.y * scale
+          };
+
+          // Draw center point indicator (AutoCAD style - crosshairs)
+          const centerCrosshair = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          centerCrosshair.classList.add('temp-arc-element');
+
+          // Horizontal crosshair line
+          const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          hLine.setAttribute('x1', (screenCenter.x - 15).toString());
+          hLine.setAttribute('y1', screenCenter.y.toString());
+          hLine.setAttribute('x2', (screenCenter.x + 15).toString());
+          hLine.setAttribute('y2', screenCenter.y.toString());
+          hLine.setAttribute('stroke', '#00ff00'); // Green like AutoCAD
+          hLine.setAttribute('stroke-width', '1');
+
+          // Vertical crosshair line
+          const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          vLine.setAttribute('x1', screenCenter.x.toString());
+          vLine.setAttribute('y1', (screenCenter.y - 15).toString());
+          vLine.setAttribute('x2', screenCenter.x.toString());
+          vLine.setAttribute('y2', (screenCenter.y + 15).toString());
+          vLine.setAttribute('stroke', '#00ff00');
+          vLine.setAttribute('stroke-width', '1');
+
+          centerCrosshair.appendChild(hLine);
+          centerCrosshair.appendChild(vLine);
+          svgOverlayRef.current.appendChild(centerCrosshair);
+
+          // Add center point label
+          const centerLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          centerLabel.setAttribute('x', (screenCenter.x + 8).toString());
+          centerLabel.setAttribute('y', (screenCenter.y - 8).toString());
+          centerLabel.setAttribute('fill', '#00ff00');
+          centerLabel.setAttribute('font-size', '12');
+          centerLabel.setAttribute('font-family', 'Arial, sans-serif');
+          centerLabel.textContent = 'Center';
+          centerLabel.classList.add('temp-arc-element');
+          svgOverlayRef.current.appendChild(centerLabel);
+        }
+      }
+    }
+  }, [isDrawingArc, arcStartPoint, arcCenter, viewport.zoom]);
+
+  // Handle keyboard events for arc tool
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isDrawingArc) {
+        if (e.key === 'Escape') {
+          // Cancel arc drawing
+          setArcStartPoint(null);
+          setArcCenter(null);
+          setIsDrawingArc(false);
+          setArcPhase('start');
+          
+          // Clear temporary elements
+          if (svgOverlayRef.current) {
+            const existingTemp = svgOverlayRef.current.querySelectorAll('.temp-arc-element');
+            existingTemp.forEach(el => svgOverlayRef.current?.removeChild(el));
+            const existingPreview = svgOverlayRef.current.querySelector('.temp-arc-preview');
+            if (existingPreview) {
+              svgOverlayRef.current.removeChild(existingPreview);
+            }
+          }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isDrawingArc]);
+
   // Get pointer position at current zoom level (for temporary drawing elements)
   const getCurrentZoomPointerPos = useCallback(
     (e: React.MouseEvent) => {
@@ -760,6 +931,106 @@ export default function PDFViewer({
     [pdfDoc, viewport.zoom]
   );
 
+  // Calculate distance between two points
+  const calculateDistance = useCallback((x1: number, y1: number, x2: number, y2: number) => {
+    return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+  }, []);
+
+  // Calculate circle center from three points (AutoCAD method)
+  const calculateCircleCenter = useCallback((p1: { x: number; y: number }, p2: { x: number; y: number }, p3: { x: number; y: number }) => {
+    const A = p2.x - p1.x;
+    const B = p2.y - p1.y;
+    const C = p3.x - p1.x;
+    const D = p3.y - p1.y;
+    
+    const E = A * (p1.x + p2.x) + B * (p1.y + p2.y);
+    const F = C * (p1.x + p3.x) + D * (p1.y + p3.y);
+    
+    const G = 2 * (A * (p3.y - p1.y) - B * (p3.x - p1.x));
+    
+    if (Math.abs(G) < 1e-10) {
+      // Points are collinear, return null
+      return null;
+    }
+    
+    const centerX = (D * E - B * F) / G;
+    const centerY = (A * F - C * E) / G;
+    
+    return { x: centerX, y: centerY };
+  }, []);
+
+  // Complete arc creation (from my-app implementation)
+  const completeArc = useCallback((startPoint: { x: number; y: number }, center: { x: number; y: number }, endPoint: { x: number; y: number }) => {
+    console.log("🔧 completeArc called with:", { startPoint, center, endPoint });
+    
+    if (center && startPoint && endPoint) {
+      const radius = calculateDistance(center.x, center.y, startPoint.x, startPoint.y);
+
+      const startAngle = Math.atan2(startPoint.y - center.y, startPoint.x - center.x);
+      const endAngle = Math.atan2(endPoint.y - center.y, endPoint.x - center.x);
+
+      let angleDiff = endAngle - startAngle;
+
+      while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+      while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+
+      const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
+      const sweepFlag = angleDiff > 0 ? 1 : 0;
+
+      const pathData = `M ${startPoint.x} ${startPoint.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${endPoint.x} ${endPoint.y}`;
+
+      const arcLength = Math.abs(angleDiff) * radius;
+
+      const newAnnotation: Omit<Annotation, "id" | "createdAt" | "updatedAt"> = {
+        documentId: documentId,
+        type: "arc",
+        page: viewport.page,
+        position: { 
+          x: startPoint.x, 
+          y: startPoint.y, 
+          width: radius, 
+          height: radius,
+          points: [
+            { x: startPoint.x, y: startPoint.y },
+            { x: center.x, y: center.y },
+            { x: endPoint.x, y: endPoint.y }
+          ]
+        },
+        style: {
+          color: "#0b74de",
+          opacity: 1,
+          strokeWidth: 2,
+          strokeColor: "#0b74de",
+        },
+        author: currentUser,
+        isVisible: true,
+        metrics: {
+          length: arcLength,
+          length_px: arcLength,
+          radius: radius,
+        }
+      };
+      
+        console.log("🔧 About to create annotation:", newAnnotation);
+        onAnnotationCreate(newAnnotation);
+        console.log("✅ Arc completed successfully! Annotation should be visible now.");
+    }
+
+    // Clear any existing calculation elements
+    if (svgOverlayRef.current) {
+      const existingCalc = svgOverlayRef.current.querySelector('.real-time-calculation');
+      if (existingCalc) {
+        svgOverlayRef.current.removeChild(existingCalc);
+      }
+    }
+
+    // Reset arc drawing state
+    setArcStartPoint(null);
+    setArcCenter(null);
+    setIsDrawingArc(false);
+    setArcPhase('start');
+  }, [calculateDistance, documentId, viewport.page, currentUser, onAnnotationCreate]);
+
   const handleMouseDown = useCallback(
     (e: React.MouseEvent, pageNumber: number) => {
       console.log("Mouse down event triggered, activeTool:", activeTool);
@@ -790,6 +1061,9 @@ export default function PDFViewer({
       const p = getPointerPos(e); // Base scale coordinates for storage
       const currentP = getCurrentZoomPointerPos(e); // Current zoom coordinates for temporary elements
 
+      // Set pointer down state
+      setIsPointerDown(true);
+
       console.log(
         "Mouse down at position:",
         p,
@@ -819,6 +1093,39 @@ export default function PDFViewer({
               isVisible: true,
             };
             onAnnotationCreate(newAnnotation);
+          }
+          return;
+
+        case "arc":
+          // AutoCAD-style arc drawing: Start point, Center, End point
+          console.log("🎯 Arc tool clicked! Current state:", { isDrawingArc, arcPhase, arcStartPoint, arcCenter });
+          
+          if (!isDrawingArc) {
+            // Phase 1: Set start point (like AutoCAD: "Specify start point of arc")
+            setArcStartPoint(p);
+            setArcPhase('center');
+            setIsDrawingArc(true);
+            setIsPointerDown(false);
+            console.log("✅ Arc: Start point set at", p, "- Next: Specify center point");
+            return;
+          } else if (arcPhase === 'center') {
+            // Phase 2: Set center point (like AutoCAD: "Specify center point of arc")
+            setArcCenter(p);
+            setArcPhase('end');
+            setIsPointerDown(false);
+            console.log("✅ Arc: Center point set at", p, "- Next: Specify end point");
+            return;
+          } else if (arcPhase === 'end') {
+            // Phase 3: Complete the arc with end point (like AutoCAD: "Specify end point of arc")
+            console.log("🎯 Completing arc with points:", { start: arcStartPoint, center: arcCenter, end: p });
+            if (arcStartPoint && arcCenter) {
+              completeArc(arcStartPoint, arcCenter, p);
+              console.log("✅ Arc completed successfully!");
+            } else {
+              console.error("❌ Missing arc points:", { arcStartPoint, arcCenter });
+            }
+            setIsPointerDown(false);
+            return;
           }
           return;
 
@@ -950,22 +1257,59 @@ export default function PDFViewer({
       documentId,
       currentUser,
       onAnnotationCreate,
+      isPointerDown,
     ]
   );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
+      // Handle arc preview drawing (from my-app implementation)
+      if (isDrawingArc && arcPhase === 'end' && arcCenter && arcStartPoint && svgOverlayRef.current) {
+        const currentP = getCurrentZoomPointerPos(e);
+        
+        // Remove existing preview
+        const existingPreview = svgOverlayRef.current.querySelector('.temp-arc-preview');
+        if (existingPreview) {
+          svgOverlayRef.current.removeChild(existingPreview);
+        }
+        
+        // Create new preview arc using center-based approach
+        const scale = viewport.zoom;
+        const screenStartPoint = {
+          x: arcStartPoint.x * scale,
+          y: arcStartPoint.y * scale
+        };
+        const screenCenter = {
+          x: arcCenter.x * scale,
+          y: arcCenter.y * scale
+        };
+        
+        const radius = calculateDistance(screenCenter.x, screenCenter.y, screenStartPoint.x, screenStartPoint.y);
+        const startAngle = Math.atan2(screenStartPoint.y - screenCenter.y, screenStartPoint.x - screenCenter.x);
+        const endAngle = Math.atan2(currentP.y - screenCenter.y, currentP.x - screenCenter.x);
+        
+        let angleDiff = endAngle - startAngle;
+        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+        
+        const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
+        const sweepFlag = angleDiff > 0 ? 1 : 0;
+        
+        const arcPath = `M ${screenStartPoint.x} ${screenStartPoint.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${currentP.x} ${currentP.y}`;
+        
+        const previewPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        previewPath.setAttribute('d', arcPath);
+        previewPath.setAttribute('stroke', '#ffff00'); // Yellow like AutoCAD preview
+        previewPath.setAttribute('stroke-width', '2');
+        previewPath.setAttribute('fill', 'none');
+        previewPath.setAttribute('stroke-dasharray', '8,4'); // More AutoCAD-like dash pattern
+        previewPath.classList.add('temp-arc-preview');
+        
+        svgOverlayRef.current.appendChild(previewPath);
+        return;
+      }
+
       if (!isCreating || !dragStart || !activeTool || !svgOverlayRef.current) {
-        // console.log(
-        //   "Mouse move blocked - isCreating:",
-        //   isCreating,
-        //   "dragStart:",
-        //   !!dragStart,
-        //   "activeTool:",
-        //   activeTool,
-        //   "svg:",
-        //   !!svgOverlayRef.current
-        // );
         return;
       }
 
@@ -1043,6 +1387,11 @@ export default function PDFViewer({
       getPointerPos,
       getCurrentZoomPointerPos,
       viewport.zoom,
+      isDrawingArc,
+      arcPhase,
+      arcCenter,
+      arcStartPoint,
+      calculateDistance,
     ]
   );
 
@@ -1050,7 +1399,14 @@ export default function PDFViewer({
     (e: React.MouseEvent, pageNumber: number) => {
       console.log("Mouse up event triggered");
 
-      if (!isCreating || !dragStart || !activeTool || !svgOverlayRef.current) {
+      // Allow arc tool to proceed even without isCreating/dragStart
+      if (activeTool === "arc" && isDrawingArc) {
+        console.log("Arc tool mouse up - allowing to proceed");
+        setIsPointerDown(false);
+        return;
+      }
+
+      if (!isCreating || !dragStart || !activeTool || !svgOverlayRef.current || !isPointerDown) {
         console.log(
           "Mouse up blocked - isCreating:",
           isCreating,
@@ -1253,6 +1609,8 @@ export default function PDFViewer({
       documentId,
       currentUser,
       onAnnotationCreate,
+      isDrawingArc,
+      isPointerDown,
     ]
   );
 
@@ -1415,7 +1773,32 @@ export default function PDFViewer({
           </div>
         )}
       </div>
+
+      {/* Arc Drawing Status Indicator - AutoCAD Style */}
+      {isDrawingArc && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-md shadow-lg z-50 font-mono">
+          <div className="text-sm">
+            <div className="font-bold">ARC Command</div>
+            <div className="text-xs mt-1">
+              {arcPhase === 'center' ? 'Specify center point of arc:' :
+                arcPhase === 'end' ? 'Specify end point of arc:' :
+                'Specify start point of arc:'}
+            </div>
+            <div className="text-xs text-blue-200 mt-1">
+              Press ESC to cancel
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+
+
+
+
+
+
+
 
