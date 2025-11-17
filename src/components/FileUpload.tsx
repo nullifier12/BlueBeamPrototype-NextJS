@@ -18,18 +18,44 @@ export default function FileUpload({
   const [uploading, setUploading] = useState(false);
 
   const handleFile = useCallback(async (file: File) => {
+    console.log("📁 File selected:", {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    });
+
     if (!file.type.includes("pdf")) {
+      console.warn("⚠️ Invalid file type:", file.type);
       alert("Please upload a PDF file");
       return;
     }
 
     setUploading(true);
+    console.log("⏳ Starting file conversion to base64...");
 
     try {
-      // Create object URL for the file
-      const fileUrl = URL.createObjectURL(file);
+      // Convert file to base64 for storage
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          // Remove data:application/pdf;base64, prefix
+          const base64Data = result.split(',')[1] || result;
+          console.log("✅ Base64 conversion complete, length:", base64Data.length);
+          resolve(base64Data);
+        };
+        reader.onerror = (error) => {
+          console.error("❌ FileReader error:", error);
+          reject(error);
+        };
+        reader.readAsDataURL(file);
+      });
 
-      // Create PDF document object
+      // Create object URL for immediate display
+      const fileUrl = URL.createObjectURL(file);
+      console.log("🔗 Created blob URL:", fileUrl.substring(0, 50) + "...");
+
+      // Create PDF document object with base64 data
       const newDocument: PDFDocument = {
         id: Date.now().toString(),
         name: file.name,
@@ -39,15 +65,29 @@ export default function FileUpload({
         updatedAt: new Date(),
         size: file.size,
         status: "active",
-      };
+        // Store base64 for database
+        base64: base64,
+      } as PDFDocument & { base64?: string };
 
+      console.log("📤 Calling onDocumentUpload with document:", {
+        name: newDocument.name,
+        hasBase64: !!base64,
+        url: newDocument.url.substring(0, 50) + "...",
+      });
+
+      // Call onDocumentUpload first, let it handle closing the modal
       onDocumentUpload(newDocument);
-      onClose();
+      // Don't close here - let the parent handle it after successful upload
     } catch (error) {
-      console.error("Error uploading file:", error);
-      alert("Error uploading file. Please try again.");
+      console.error("❌ Error uploading file:", error);
+      console.error("Error details:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      alert("Error uploading file. Please try again. Check console for details.");
     } finally {
       setUploading(false);
+      console.log("🏁 File upload process finished");
     }
   }, [onDocumentUpload, onClose]);
 

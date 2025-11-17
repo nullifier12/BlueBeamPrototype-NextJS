@@ -17,12 +17,10 @@ interface PDFViewerProps {
     annotation: Omit<Annotation, "id" | "createdAt" | "updatedAt">
   ) => void;
   onAnnotationUpdate: (annotation: Annotation) => void;
+  onPunchItemImageUpdate?: (annotationId: string, imageData: string) => void;
 }
 
 export default function PDFViewer({
-  // ...existing code...
-
-  // ...existing code...
   documentUrl,
   documentId,
   annotations,
@@ -31,6 +29,8 @@ export default function PDFViewer({
   viewport,
   onViewportChange,
   onAnnotationCreate,
+  onAnnotationUpdate,
+  onPunchItemImageUpdate,
 }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [isCreating, setIsCreating] = useState(false);
@@ -691,20 +691,31 @@ export default function PDFViewer({
 
   // Load PDF when document URL changes
   useEffect(() => {
+    console.log("🔄 PDFViewer useEffect - documentUrl changed:", {
+      hasUrl: !!documentUrl,
+      url: documentUrl?.substring(0, 50) + "...",
+      hasPdfjsLib: !!window.pdfjsLib,
+    });
+    
     if (documentUrl) {
       // Ensure pdfjsLib is available before attempting to load PDF
       if (window.pdfjsLib) {
+        console.log("✅ pdfjsLib available, loading PDF...");
         loadPDF(documentUrl);
       } else {
+        console.log("⏳ Waiting for pdfjsLib to load...");
         // If pdfjsLib is not yet loaded, wait for it
         const checkPdfjs = setInterval(() => {
           if (window.pdfjsLib) {
+            console.log("✅ pdfjsLib loaded, loading PDF...");
             clearInterval(checkPdfjs);
             loadPDF(documentUrl);
           }
         }, 100);
         return () => clearInterval(checkPdfjs);
       }
+    } else {
+      console.warn("⚠️ No documentUrl provided to PDFViewer");
     }
   }, [documentUrl, loadPDF]);
 

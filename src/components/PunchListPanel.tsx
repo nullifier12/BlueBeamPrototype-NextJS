@@ -1,25 +1,12 @@
-"use client";
-
 import React, { useState, useCallback } from "react";
-import {
-  Plus,
-  ChevronDown,
-  ChevronRight,
-  Edit,
-  Trash2,
-  Paperclip,
-} from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, Trash2, Edit } from "lucide-react";
 import { PunchListItem, PunchListSummary } from "@/types";
-import { cn } from "@/utils/cn";
 
 interface PunchListPanelProps {
   punchItems: PunchListItem[];
-  onPunchItemCreate: (
-    item: Omit<PunchListItem, "id" | "createdAt" | "updatedAt">
-  ) => void;
+  onPunchItemCreate: (item: Omit<PunchListItem, "id" | "createdAt" | "updatedAt">) => void;
   onPunchItemUpdate: (item: PunchListItem) => void;
   onPunchItemDelete: (id: string) => void;
-  onAnnotationSelect: (annotationId: string) => void;
 }
 
 export default function PunchListPanel({
@@ -27,282 +14,278 @@ export default function PunchListPanel({
   onPunchItemCreate,
   onPunchItemUpdate,
   onPunchItemDelete,
-  onAnnotationSelect,
 }: PunchListPanelProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [newItemDescription, setNewItemDescription] = useState("");
 
-  const summary: PunchListSummary = {
+  const punchListSummary: PunchListSummary = {
     total: punchItems.length,
     open: punchItems.filter((item) => item.status === "Open").length,
-    inProgress: punchItems.filter((item) => item.status === "In-Progress")
-      .length,
+    inProgress: punchItems.filter((item) => item.status === "In-Progress").length,
     closed: punchItems.filter((item) => item.status === "Closed").length,
-    progressPercent:
-      punchItems.length > 0
-        ? Math.round(
-            (punchItems.filter((item) => item.status === "Closed").length /
-              punchItems.length) *
-              100
-          )
-        : 0,
+    progressPercent: punchItems.length > 0 
+      ? Math.round((punchItems.filter((item) => item.status === "Closed").length / punchItems.length) * 100)
+      : 0,
   };
 
-  const handleCreatePunchItem = useCallback(() => {
-    const newItem: Omit<PunchListItem, "id" | "createdAt" | "updatedAt"> = {
-      description: "New Issue",
-      demarcation: "",
-      location: "",
-      status: "Open",
-      percentComplete: 0,
-      assignedTo: "",
-      attachments: [],
-      comments: "",
-    };
-    onPunchItemCreate(newItem);
-  }, [onPunchItemCreate]);
-
-  const handleStatusChange = useCallback(
-    (item: PunchListItem, status: PunchListItem["status"]) => {
-      const updatedItem = { ...item, status, updatedAt: new Date() };
-      if (status === "Closed") {
-        updatedItem.percentComplete = 100;
-      } else if (status === "Open") {
-        updatedItem.percentComplete = 0;
-      }
-      onPunchItemUpdate(updatedItem);
-    },
-    [onPunchItemUpdate]
-  );
-
-  const handlePercentChange = useCallback(
-    (item: PunchListItem, percent: number) => {
-      const status: PunchListItem["status"] =
-        percent === 100 ? "Closed" : percent > 0 ? "In-Progress" : "Open";
-      const updatedItem = {
-        ...item,
-        percentComplete: percent,
-        status,
-        updatedAt: new Date(),
+  const handleAddNewItem = useCallback(() => {
+    if (newItemDescription.trim()) {
+      const newItem: Omit<PunchListItem, "id" | "createdAt" | "updatedAt"> = {
+        description: newItemDescription,
+        demarcation: "",
+        demarcationId: String.fromCharCode(65 + punchItems.length),
+        location: "-",
+        page: 1,
+        position: { x: 0, y: 0 },
+        status: "Open",
+        percentComplete: 0,
+        assignedTo: "",
+        attachments: [],
+        comments: "",
       };
-      onPunchItemUpdate(updatedItem);
-    },
-    [onPunchItemUpdate]
-  );
-
-  const getStatusColor = (status: PunchListItem["status"]) => {
-    switch (status) {
-      case "Open":
-        return "text-red-600 bg-red-50";
-      case "In-Progress":
-        return "text-yellow-600 bg-yellow-50";
-      case "Closed":
-        return "text-green-600 bg-green-50";
-      default:
-        return "text-gray-600 bg-gray-50";
+      onPunchItemCreate(newItem);
+      setNewItemDescription("");
     }
-  };
+  }, [newItemDescription, punchItems.length, onPunchItemCreate]);
 
-  const getProgressBarColor = (percent: number) => {
-    if (percent < 30) return "bg-red-500";
-    if (percent < 70) return "bg-yellow-500";
-    return "bg-green-500";
-  };
+  const handleStatusChange = useCallback((id: string, newStatus: "Open" | "In-Progress" | "Closed") => {
+    const item = punchItems.find(p => p.id === id);
+    if (item) {
+      let newPercent = item.percentComplete;
+      if (newStatus === "Open") newPercent = 0;
+      else if (newStatus === "Closed") newPercent = 100;
+      
+      onPunchItemUpdate({ ...item, status: newStatus, percentComplete: newPercent });
+    }
+  }, [punchItems, onPunchItemUpdate]);
+
+  const handlePercentChange = useCallback((id: string, newPercent: number) => {
+    const item = punchItems.find(p => p.id === id);
+    if (item) {
+      onPunchItemUpdate({ ...item, percentComplete: newPercent });
+    }
+  }, [punchItems, onPunchItemUpdate]);
+
+  const handleDescriptionChange = useCallback((id: string, newDescription: string) => {
+    const item = punchItems.find(p => p.id === id);
+    if (item) {
+      onPunchItemUpdate({ ...item, description: newDescription });
+    }
+  }, [punchItems, onPunchItemUpdate]);
+
+  const handleAssignedToChange = useCallback((id: string, newAssignedTo: string) => {
+    const item = punchItems.find(p => p.id === id);
+    if (item) {
+      onPunchItemUpdate({ ...item, assignedTo: newAssignedTo });
+    }
+  }, [punchItems, onPunchItemUpdate]);
+
+  const handleCommentsChange = useCallback((id: string, newComments: string) => {
+    const item = punchItems.find(p => p.id === id);
+    if (item) {
+      onPunchItemUpdate({ ...item, comments: newComments });
+    }
+  }, [punchItems, onPunchItemUpdate]);
+
+  const handleDeleteItem = useCallback((id: string) => {
+    if (window.confirm('Delete this punch item?')) {
+      onPunchItemDelete(id);
+    }
+  }, [onPunchItemDelete]);
 
   return (
-    <div className="w-80 border-l border-border bg-background flex flex-col">
+    <div className={`fixed bottom-0 left-0 right-0 bg-background border-t-2 border-border rounded-t-lg shadow-lg z-50 flex flex-col transition-all duration-300 ${
+      isExpanded ? 'h-80' : 'h-12'
+    }`}>
       {/* Header */}
-      <div className="p-4 border-b border-border">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Punch List</h2>
-          <button
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            className="p-1 hover:bg-muted rounded transition-colors"
-          >
-            {isCollapsed ? (
-              <ChevronRight size={16} />
-            ) : (
-              <ChevronDown size={16} />
-            )}
-          </button>
+      <div 
+        className="flex justify-between items-center p-3 bg-muted border-b border-border cursor-pointer hover:bg-muted/80 transition-colors"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex items-center gap-3">
+          <span className="font-semibold text-foreground">Punch List</span>
+          {!isExpanded && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="text-red-600 font-medium">{punchListSummary.open} Open</span>
+              <span className="text-muted-foreground">/</span>
+              <span className="text-orange-600 font-medium">{punchListSummary.inProgress} In-Progress</span>
+              <span className="text-muted-foreground">/</span>
+              <span className="text-green-600 font-medium">{punchListSummary.closed} Closed</span>
+              <span className="text-muted-foreground">({punchListSummary.progressPercent}%)</span>
+            </div>
+          )}
         </div>
-
-        {/* Summary */}
-        {!isCollapsed && (
-          <div className="space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-red-600">{summary.open} Open</span>
-              <span className="text-yellow-600">
-                {summary.inProgress} In-Progress
-              </span>
-              <span className="text-green-600">{summary.closed} Closed</span>
-            </div>
-
-            <div className="space-y-2">
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className={cn(
-                    "h-2 rounded-full transition-all",
-                    getProgressBarColor(summary.progressPercent)
-                  )}
-                  style={{ width: `${summary.progressPercent}%` }}
-                />
-              </div>
-              <div className="text-center text-sm font-medium">
-                {summary.progressPercent}% complete
-              </div>
-            </div>
-
-            <button
-              onClick={handleCreatePunchItem}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
-            >
-              <Plus size={16} />
-              New Item
-            </button>
-          </div>
-        )}
+        <button className="p-1 hover:bg-muted/80 rounded">
+          {isExpanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+        </button>
       </div>
 
-      {/* Punch Items List */}
-      {!isCollapsed && (
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-4">
-            {punchItems.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <p className="text-sm">No punch items yet</p>
-                <p className="text-xs">
-                  Create annotations to automatically generate punch items
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {punchItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-3 border border-border rounded-lg hover:shadow-sm transition-shadow"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-sm truncate">
-                          {item.description}
-                        </h4>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {item.location}
-                        </p>
-                      </div>
-                      <span
-                        className={cn(
-                          "px-2 py-1 text-xs rounded-full whitespace-nowrap",
-                          getStatusColor(item.status)
-                        )}
-                      >
-                        {item.status}
-                      </span>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={item.status}
-                          onChange={(e) =>
-                            handleStatusChange(
-                              item,
-                              e.target.value as PunchListItem["status"]
-                            )
-                          }
-                          className="text-xs border border-border rounded px-2 py-1 bg-background"
-                        >
-                          <option value="Open">Open</option>
-                          <option value="In-Progress">In-Progress</option>
-                          <option value="Closed">Closed</option>
-                        </select>
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={item.percentComplete}
-                          onChange={(e) =>
-                            handlePercentChange(
-                              item,
-                              parseInt(e.target.value) || 0
-                            )
-                          }
-                          className="text-xs border border-border rounded px-2 py-1 bg-background w-16"
-                          placeholder="%"
-                        />
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="text"
-                          value={item.assignedTo}
-                          onChange={(e) =>
-                            onPunchItemUpdate({
-                              ...item,
-                              assignedTo: e.target.value,
-                              updatedAt: new Date(),
-                              status: item.status as PunchListItem["status"],
-                            })
-                          }
-                          placeholder="Assigned to"
-                          className="text-xs border border-border rounded px-2 py-1 bg-background flex-1"
-                        />
-                      </div>
-
-                      <textarea
-                        value={item.comments}
-                        onChange={(e) =>
-                          onPunchItemUpdate({
-                            ...item,
-                            comments: e.target.value,
-                            updatedAt: new Date(),
-                            status: item.status as PunchListItem["status"],
-                          })
-                        }
-                        placeholder="Comments..."
-                        className="text-xs border border-border rounded px-2 py-1 bg-background w-full h-16 resize-none"
-                      />
-
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          {item.attachments.length > 0 && (
-                            <Paperclip
-                              size={12}
-                              className="text-muted-foreground"
-                            />
-                          )}
-                          <span className="text-xs text-muted-foreground">
-                            {item.attachments.length} attachments
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() =>
-                              item.annotationId &&
-                              onAnnotationSelect(item.annotationId)
-                            }
-                            className="p-1 hover:bg-muted rounded transition-colors"
-                            title="Go to annotation"
-                          >
-                            <Edit size={12} />
-                          </button>
-                          <button
-                            onClick={() => onPunchItemDelete(item.id)}
-                            className="p-1 hover:bg-destructive/10 text-destructive rounded transition-colors"
-                            title="Delete item"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+      {isExpanded && (
+        <>
+          {/* Summary */}
+          <div className="p-3 border-b border-border bg-muted">
+            <div className="flex items-center gap-2 text-sm mb-2">
+              <span className="text-red-600 font-medium">{punchListSummary.open} Open</span>
+              <span className="text-muted-foreground">/</span>
+              <span className="text-orange-600 font-medium">{punchListSummary.inProgress} In-Progress</span>
+              <span className="text-muted-foreground">/</span>
+              <span className="text-green-600 font-medium">{punchListSummary.closed} Closed</span>
+            </div>
+            
+            {/* Progress Bar */}
+            <div className="h-2 bg-muted rounded-full mb-2">
+              <div 
+                className="h-2 rounded-full transition-all duration-300"
+                style={{ 
+                  width: `${punchListSummary.progressPercent}%`,
+                  backgroundColor: punchListSummary.progressPercent === 100 ? '#22c55e' : '#ef4444'
+                }}
+              />
+            </div>
+            <div className="text-sm font-medium">
+              <strong>{punchListSummary.progressPercent}%</strong> complete
+            </div>
           </div>
-        </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto p-3">
+            {/* Add New Item */}
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                placeholder="New punch item description..."
+                value={newItemDescription}
+                onChange={(e) => setNewItemDescription(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleAddNewItem()}
+                className="flex-1 px-3 py-2 border border-border rounded-md bg-input text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+              <button
+                onClick={handleAddNewItem}
+                className="px-3 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+              >
+                + New Item
+              </button>
+            </div>
+
+            {/* Punch List Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm bg-background rounded-lg overflow-hidden shadow-sm">
+                <thead>
+                  <tr className="bg-muted">
+                    <th className="border border-border p-2 text-left font-semibold text-xs uppercase tracking-wide">#</th>
+                    <th className="border border-border p-2 text-left font-semibold text-xs uppercase tracking-wide">Description</th>
+                    <th className="border border-border p-2 text-left font-semibold text-xs uppercase tracking-wide">Demarcation</th>
+                    <th className="border border-border p-2 text-left font-semibold text-xs uppercase tracking-wide">Location & Metrics</th>
+                    <th className="border border-border p-2 text-left font-semibold text-xs uppercase tracking-wide">Status</th>
+                    <th className="border border-border p-2 text-left font-semibold text-xs uppercase tracking-wide">% Done</th>
+                    <th className="border border-border p-2 text-left font-semibold text-xs uppercase tracking-wide">Assigned To</th>
+                    <th className="border border-border p-2 text-left font-semibold text-xs uppercase tracking-wide">Comments</th>
+                    <th className="border border-border p-2 text-left font-semibold text-xs uppercase tracking-wide">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {punchItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="text-center py-8 text-muted-foreground">
+                        No punch items yet
+                      </td>
+                    </tr>
+                  ) : (
+                    punchItems.map((item, index) => (
+                      <tr key={item.id || `punch-item-${index}`} className="hover:bg-muted/50">
+                        <td className="border border-border p-2 font-medium">{index + 1}</td>
+                        <td className="border border-border p-2">
+                          <input
+                            type="text"
+                            value={item.description}
+                            onChange={(e) => handleDescriptionChange(item.id, e.target.value)}
+                            className="w-full px-2 py-1 text-xs border border-border rounded bg-input focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </td>
+                        <td className="border border-border p-2">
+                          {item.demarcationImage ? (
+                            <div className="w-16 h-16 border border-border rounded overflow-hidden bg-muted">
+                              <img 
+                                src={item.demarcationImage} 
+                                alt={`Demarcation ${item.demarcationId || 'A'}`}
+                                className="w-full h-full object-cover"
+                                title={`Demarcated area: ${item.demarcation || item.demarcationId || 'A'}`}
+                                onError={(e) => {
+                                  console.error('Image failed to load:', item.demarcationImage);
+                                  e.currentTarget.style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="w-16 h-16 border border-border rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                              {item.demarcation || item.demarcationId || 'A'}
+                            </div>
+                          )}
+                        </td>
+                        <td className="border border-border p-2 text-xs text-muted-foreground">
+                          {item.location || `Page ${item.page || 1} / X:${item.position?.x || 0} Y:${item.position?.y || 0}`}
+                        </td>
+                        <td className="border border-border p-2">
+                          <select
+                            value={item.status}
+                            onChange={(e) => handleStatusChange(item.id, e.target.value as "Open" | "In-Progress" | "Closed")}
+                            className="px-2 py-1 text-xs border border-border rounded bg-input focus:outline-none focus:ring-1 focus:ring-primary"
+                          >
+                            <option value="Open">Open</option>
+                            <option value="In-Progress">In-Progress</option>
+                            <option value="Closed">Closed</option>
+                          </select>
+                        </td>
+                        <td className="border border-border p-2">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={item.percentComplete}
+                            onChange={(e) => handlePercentChange(item.id, parseInt(e.target.value) || 0)}
+                            disabled={item.status === "Open" || item.status === "Closed"}
+                            className={`w-16 px-2 py-1 text-xs border border-border rounded bg-input focus:outline-none focus:ring-1 focus:ring-primary ${
+                              item.status === "Open" || item.status === "Closed" ? "opacity-50 cursor-not-allowed" : ""
+                            }`}
+                          />
+                        </td>
+                        <td className="border border-border p-2">
+                          <input
+                            type="text"
+                            value={item.assignedTo}
+                            onChange={(e) => handleAssignedToChange(item.id, e.target.value)}
+                            placeholder="Assignee"
+                            className="w-full px-2 py-1 text-xs border border-border rounded bg-input focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </td>
+                        <td className="border border-border p-2">
+                          <textarea
+                            value={item.comments}
+                            onChange={(e) => handleCommentsChange(item.id, e.target.value)}
+                            placeholder="Comments"
+                            rows={2}
+                            className="w-full px-2 py-1 text-xs border border-border rounded bg-input focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                          />
+                        </td>
+                        <td className="border border-border p-2">
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleDeleteItem(item.id)}
+                              className="p-1 hover:bg-destructive/10 text-destructive rounded transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

@@ -54,6 +54,8 @@ export interface Position {
   radius?: number;
   startAngle?: number;
   endAngle?: number;
+  sweepFlag?: number;
+  largeArcFlag?: number;
 }
 
 export interface AnnotationStyle {
@@ -105,7 +107,11 @@ export interface PunchListItem {
   annotationId?: string;
   description: string;
   demarcation: string;
+  demarcationId?: string; // A, B, C, D, etc.
+  demarcationImage?: string; // Base64 image data of the demarcated area
   location: string;
+  page?: number;
+  position?: { x: number; y: number };
   status: 'Open' | 'In-Progress' | 'Closed';
   percentComplete: number;
   assignedTo: string;
