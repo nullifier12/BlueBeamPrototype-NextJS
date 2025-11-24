@@ -132,3 +132,5 @@ npm run dev
 - Ensure MySQL server is running
 - Check database connection in `.env.local`
 
+
+

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query } from './db';
+import { UserRow, ProjectRow } from '@/types';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
@@ -22,7 +23,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export async function login(username: string, password: string, projectId?: string): Promise<{ user: User; token: string; projectId?: string } | null> {
-  const users = await query(
+  const users = await query<UserRow & { username: string; password: string }>(
     'SELECT id, username, password, name, email, avatar, color FROM users WHERE username = ?',
     [username]
   );
@@ -40,7 +41,7 @@ export async function login(username: string, password: string, projectId?: stri
 
   // If projectId is provided, verify user has access to it
   if (projectId) {
-    const projectAccess = await query(
+    const projectAccess = await query<ProjectRow & { project_id: string }>(
       `SELECT p.id, p.project_id 
        FROM projects p
        INNER JOIN project_users pu ON p.id = pu.project_id
@@ -91,16 +92,24 @@ export async function login(username: string, password: string, projectId?: stri
   };
 }
 
+interface JwtPayload {
+  userId: string;
+  username: string;
+  projectId?: string;
+}
+
 export function verifyToken(token: string): { userId: string; username: string; projectId?: string } | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
     return {
       userId: decoded.userId,
       username: decoded.username,
       projectId: decoded.projectId,
     };
-  } catch (error) {
+  } catch {
     return null;
   }
 }
+
+
 

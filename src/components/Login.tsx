@@ -2,9 +2,10 @@
 
 import React, { useState } from 'react';
 import { LogIn, Loader2 } from 'lucide-react';
+import { User } from '@/types';
 
 interface LoginProps {
-  onLoginSuccess: (user: any, projectId: string) => void;
+  onLoginSuccess: (user: User, projectId?: string) => void;
 }
 
 export default function Login({ onLoginSuccess }: LoginProps) {
@@ -63,8 +64,9 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       }
       
       onLoginSuccess(data.user, data.projectId || undefined);
-    } catch (err: any) {
-      setError(err.message || 'An error occurred');
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
+      setError(errorMessage);
       setLoading(false);
     }
   };

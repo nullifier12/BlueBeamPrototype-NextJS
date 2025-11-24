@@ -86,3 +86,5 @@ Try logging in with:
 ### Permission Error
 - Ensure the MySQL user has CREATE, INSERT, UPDATE, DELETE permissions
 
+
+

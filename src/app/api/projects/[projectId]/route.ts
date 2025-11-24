@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
+import { ProjectRow, ProjectUserRow } from '@/types';
 
 export async function GET(
   request: NextRequest,
@@ -18,7 +19,7 @@ export async function GET(
     }
 
     const { projectId } = await params;
-    const projects = await query(
+    const projects = await query<ProjectRow>(
       `SELECT p.*, u.name as created_by_name
        FROM projects p
        LEFT JOIN users u ON p.created_by = u.id
@@ -33,7 +34,7 @@ export async function GET(
     const project = projects[0];
 
     // Verify user has access
-    const access = await query(
+    const access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [project.id, decoded.userId]
     );
@@ -43,10 +44,11 @@ export async function GET(
     }
 
     return NextResponse.json({ project });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Get project error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Internal server error', message: error.message },
+      { error: 'Internal server error', message: errorMessage },
       { status: 500 }
     );
   }
@@ -71,7 +73,7 @@ export async function PUT(
     const body = await request.json();
 
     // Verify user has access
-    const access = await query(
+    const access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [projectId, decoded.userId]
     );
@@ -82,7 +84,7 @@ export async function PUT(
 
     // Build dynamic UPDATE query - only update fields that are provided
     const updateFields: string[] = [];
-    const updateValues: any[] = [];
+    const updateValues: (string | number | null | undefined)[] = [];
     
     // Only include fields that are explicitly provided in the request body
     if (body.name !== undefined) {
@@ -128,10 +130,11 @@ export async function PUT(
     );
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Update project error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Internal server error', message: error.message },
+      { error: 'Internal server error', message: errorMessage },
       { status: 500 }
     );
   }

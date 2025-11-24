@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
 import { randomUUID } from 'crypto';
+import { ProjectRow, DocumentRow, ProjectUserRow } from '@/types';
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
     }
 
     // First, find the project by project_id (human-readable) or id (UUID)
-    const projects = await query(
+    const projects = await query<ProjectRow>(
       'SELECT id, project_id FROM projects WHERE id = ? OR project_id = ?',
       [projectId, projectId]
     );
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest) {
     const projectUuid = project.id; // Use the UUID for project_users lookup
 
     // Verify user has access to project (using UUID)
-    const access = await query(
+    const access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [projectUuid, decoded.userId]
     );
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'No access to project' }, { status: 403 });
     }
 
-    const documents = await query(
+    const documents = await query<DocumentRow>(
       `SELECT d.*, u.name as created_by_name
        FROM documents d
        LEFT JOIN users u ON d.created_by = u.id
@@ -56,10 +57,11 @@ export async function GET(request: NextRequest) {
 
     // Return documents with file_data (base64) - client will convert to blob URL
     return NextResponse.json({ documents });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Get documents error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Internal server error', message: error.message },
+      { error: 'Internal server error', message: errorMessage },
       { status: 500 }
     );
   }
@@ -88,7 +90,7 @@ export async function POST(request: NextRequest) {
     }
 
     // First, find the project by project_id (human-readable) or id (UUID)
-    let projects = await query(
+    const projects = await query<ProjectRow>(
       'SELECT id, project_id FROM projects WHERE id = ? OR project_id = ?',
       [projectId, projectId]
     );
@@ -118,7 +120,7 @@ export async function POST(request: NextRequest) {
       projectUuid = project.id; // Use the UUID for project_users lookup
 
       // Verify user has access to project (using UUID)
-      const access = await query(
+      const access = await query<ProjectUserRow>(
         'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
         [projectUuid, decoded.userId]
       );
@@ -142,12 +144,13 @@ export async function POST(request: NextRequest) {
       [id, projectUuid, name, filePath || null, fileUrl || null, fileData || null, fileSize, pageCount || 0, decoded.userId]
     );
 
-    const documents = await query('SELECT * FROM documents WHERE id = ?', [id]);
+    const documents = await query<DocumentRow>('SELECT * FROM documents WHERE id = ?', [id]);
     return NextResponse.json({ document: documents[0] }, { status: 201 });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Create document error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Internal server error', message: error.message },
+      { error: 'Internal server error', message: errorMessage },
       { status: 500 }
     );
   }

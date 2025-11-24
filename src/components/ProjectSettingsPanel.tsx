@@ -91,7 +91,7 @@ export default function ProjectSettingsPanel({
                 </button>
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Current: {localProject.calibrationFactor.toFixed(6)} units/px
+                Current: {(localProject.calibrationFactor || 1.0).toFixed(6)} units/px
               </p>
             </div>
 
@@ -163,10 +163,10 @@ export default function ProjectSettingsPanel({
         <div className="p-4 space-y-2">
           <div className="text-sm font-medium">{project.name}</div>
           <div className="text-xs text-muted-foreground">
-            Scale: {project.calibrationFactor.toFixed(6)} units/px
+            Scale: {(project.calibrationFactor || 1.0).toFixed(6)} units/px
           </div>
           <div className="text-xs text-muted-foreground">
-            Notes: {project.inspectionNotes.length} chars
+            Notes: {(project.inspectionNotes || project.project_notes || '').length} chars
           </div>
         </div>
       )}

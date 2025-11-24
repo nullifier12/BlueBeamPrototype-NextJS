@@ -73,13 +73,19 @@ export default function BlueBeamApp() {
         setProjectLocation(p.location || "");
         setProjectTargetCompletion(p.target_completion || "");
         setCompanyName(p.company_name || "");
-        setCalibrationFactor(parseFloat(p.calibration_factor) || 1.0);
+        setCalibrationFactor(
+          p.calibration_factor 
+            ? (typeof p.calibration_factor === 'number' 
+                ? p.calibration_factor 
+                : parseFloat(p.calibration_factor)) || 1.0
+            : (p.calibrationFactor || 1.0)
+        );
         setProjectNotes(p.project_notes || "");
       }
 
       // Load documents
       const docsData = await api.getDocuments(currentProjectId);
-      const transformedDocs = docsData.documents.map((doc: any) => {
+      const transformedDocs = docsData.documents.map((doc: PDFDocument) => {
         // If we have base64 data, convert it to blob URL
         // This is needed because blob URLs from previous sessions are invalid
         let url = doc.file_url || doc.file_path;
@@ -132,8 +138,8 @@ export default function BlueBeamApp() {
           name: doc.name,
           url: url || "",
           pageCount: doc.page_count || 0,
-          createdAt: new Date(doc.created_at),
-          updatedAt: new Date(doc.updated_at),
+          createdAt: doc.createdAt || (doc.created_at ? new Date(doc.created_at) : new Date()),
+          updatedAt: doc.updatedAt || (doc.updated_at ? new Date(doc.updated_at) : new Date()),
           size: doc.file_size || 0,
           status: doc.status || "active",
         };
@@ -152,7 +158,7 @@ export default function BlueBeamApp() {
       // Load annotations for the project (will filter by document when one is selected)
       const annsData = await api.getAnnotations(currentProjectId);
       setAnnotations(
-        annsData.annotations.map((ann: any) => ({
+        annsData.annotations.map((ann: Annotation) => ({
           ...ann,
           createdAt: new Date(ann.createdAt),
           updatedAt: new Date(ann.updatedAt),
@@ -162,7 +168,7 @@ export default function BlueBeamApp() {
       // Load punch items
       const punchData = await api.getPunchItems(currentProjectId);
       setPunchItems(
-        punchData.punchItems.map((item: any) => ({
+        punchData.punchItems.map((item: PunchListItem) => ({
           ...item,
           createdAt: new Date(item.createdAt),
           updatedAt: new Date(item.updatedAt),
@@ -220,7 +226,7 @@ export default function BlueBeamApp() {
           .getAnnotations(currentProjectId, document.id)
           .then((data) => {
             setAnnotations(
-              data.annotations.map((ann: any) => ({
+              data.annotations.map((ann: Annotation) => ({
                 ...ann,
                 createdAt: new Date(ann.createdAt),
                 updatedAt: new Date(ann.updatedAt),
@@ -672,10 +678,10 @@ export default function BlueBeamApp() {
   }, []);
 
   const handleDocumentUpload = useCallback(
-    async (newDocument: PDFDocument) => {
+    async (newDocument: PDFDocument & { base64?: string }) => {
       console.log("📤 handleDocumentUpload called", {
         documentName: newDocument.name,
-        hasBase64: !!(newDocument as any).base64,
+        hasBase64: !!newDocument.base64,
         currentProjectId,
         projectId,
         documentSize: newDocument.size,
@@ -703,7 +709,7 @@ export default function BlueBeamApp() {
 
       try {
         // Get base64 from document (added by FileUpload component)
-        const base64 = (newDocument as any).base64;
+        const base64 = newDocument.base64;
         
         if (!base64) {
           console.error("❌ No base64 data in document");
@@ -733,8 +739,8 @@ export default function BlueBeamApp() {
         const doc = {
           ...newDocument,
           id: result.document.id,
-          createdAt: new Date(result.document.created_at),
-          updatedAt: new Date(result.document.updated_at),
+          createdAt: result.document.createdAt || (result.document.created_at ? new Date(result.document.created_at) : new Date()),
+          updatedAt: result.document.updatedAt || (result.document.updated_at ? new Date(result.document.updated_at) : new Date()),
         };
 
         setDocuments((prev) => [doc, ...prev]);

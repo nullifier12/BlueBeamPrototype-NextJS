@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
 import { randomUUID } from 'crypto';
+import { PunchListItem, PunchListItemRow, ProjectUserRow } from '@/types';
+
+// Helper function to safely parse float from number or string
+function safeParseFloat(value: number | string | null | undefined): number {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+  if (typeof value === 'number') {
+    return value;
+  }
+  return parseFloat(value);
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -30,7 +42,7 @@ export async function GET(request: NextRequest) {
 
     // Verify user has access to project
     console.log("🔐 Verifying project access...");
-    const access = await query(
+    const access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [projectId, decoded.userId]
     );
@@ -43,7 +55,7 @@ export async function GET(request: NextRequest) {
     }
 
     console.log("📋 Fetching punch items from database...");
-    const punchItems = await query(
+    const punchItems = await query<PunchListItemRow>(
       `SELECT p.*, u.name as created_by_name
        FROM punch_list_items p
        LEFT JOIN users u ON p.created_by = u.id
@@ -54,7 +66,7 @@ export async function GET(request: NextRequest) {
 
     console.log("✅ Found punch items:", punchItems.length);
 
-    const transformed = punchItems.map((item: any) => {
+    const transformed = punchItems.map((item: PunchListItemRow): PunchListItem | null => {
       try {
         return {
           id: item.id,
@@ -67,9 +79,9 @@ export async function GET(request: NextRequest) {
           location: item.location || '',
           page: item.page || undefined,
           position: item.position_x !== null && item.position_y !== null
-            ? { x: parseFloat(item.position_x), y: parseFloat(item.position_y) }
+            ? { x: safeParseFloat(item.position_x), y: safeParseFloat(item.position_y) }
             : undefined,
-          status: item.status,
+          status: item.status as 'Open' | 'In-Progress' | 'Closed',
           percentComplete: item.percent_complete,
           assignedTo: item.assigned_to || '',
       attachments: (() => {
@@ -91,29 +103,29 @@ export async function GET(request: NextRequest) {
           createdAt: item.created_at,
           updatedAt: item.updated_at,
         };
-      } catch (transformError: any) {
+      } catch (transformError) {
         console.error("❌ Error transforming punch item:", item.id, transformError);
         return null;
       }
-    }).filter(item => item !== null);
+    }).filter((item: PunchListItem | null): item is PunchListItem => item !== null);
 
     console.log("✅ Returning transformed punch items:", transformed.length);
     return NextResponse.json({ punchItems: transformed });
-  } catch (error: any) {
+  } catch (error) {
     console.error('❌ Get punch items error:', error);
-    console.error('Error stack:', error.stack);
-    console.error('Error details:', {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    const errorDetails = error instanceof Error ? {
       message: error.message,
       name: error.name,
-      code: error.code,
-      sqlState: error.sqlState,
-      sqlMessage: error.sqlMessage,
-    });
+    } : {};
+    console.error('Error stack:', errorStack);
+    console.error('Error details:', errorDetails);
     return NextResponse.json(
       { 
         error: 'Internal server error', 
-        message: error.message,
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        message: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? errorStack : undefined
       },
       { status: 500 }
     );
@@ -167,7 +179,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify user has access to project
-    const access = await query(
+    const access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [projectId, decoded.userId]
     );
@@ -214,19 +226,22 @@ export async function POST(request: NextRequest) {
         ]
       );
       console.log("✅ Punch item inserted successfully");
-    } catch (dbError: any) {
+    } catch (dbError) {
       console.error("❌ Database error inserting punch item:", dbError);
-      console.error("SQL Error details:", {
-        message: dbError.message,
-        code: dbError.code,
-        sqlState: dbError.sqlState,
-        sqlMessage: dbError.sqlMessage,
-      });
+      if (dbError instanceof Error) {
+        console.error("SQL Error details:", {
+          message: dbError.message,
+          name: dbError.name,
+        });
+      }
       throw dbError;
     }
 
-    const items = await query('SELECT * FROM punch_list_items WHERE id = ?', [id]);
+    const items = await query<PunchListItemRow>('SELECT * FROM punch_list_items WHERE id = ?', [id]);
     const item = items[0];
+    if (!item) {
+      return NextResponse.json({ error: 'Punch item not found' }, { status: 404 });
+    }
 
     const newItem = {
       id: item.id,
@@ -238,8 +253,8 @@ export async function POST(request: NextRequest) {
       demarcationImage: item.demarcation_image || undefined,
       location: item.location || '',
       page: item.page || undefined,
-      position: item.position_x !== null && item.position_y !== null
-        ? { x: parseFloat(item.position_x), y: parseFloat(item.position_y) }
+        position: item.position_x !== null && item.position_y !== null
+        ? { x: safeParseFloat(item.position_x), y: safeParseFloat(item.position_y) }
         : undefined,
       status: item.status,
       percentComplete: item.percent_complete,
@@ -265,19 +280,21 @@ export async function POST(request: NextRequest) {
     };
 
     return NextResponse.json({ punchItem: newItem }, { status: 201 });
-  } catch (error: any) {
+  } catch (error) {
     console.error('❌ Create punch item error:', error);
-    console.error('Error stack:', error.stack);
-    console.error('Error details:', {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    const errorDetails = error instanceof Error ? {
       message: error.message,
       name: error.name,
-      code: error.code,
-    });
+    } : {};
+    console.error('Error stack:', errorStack);
+    console.error('Error details:', errorDetails);
     return NextResponse.json(
       { 
         error: 'Internal server error', 
-        message: error.message,
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        message: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? errorStack : undefined
       },
       { status: 500 }
     );

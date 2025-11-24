@@ -37,11 +37,14 @@ export async function POST(request: NextRequest) {
     });
 
     return response;
-  } catch (error: any) {
+  } catch (error) {
     console.error("Login error:", error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: "Internal server error", message: error.message },
+      { error: "Internal server error", message: errorMessage },
       { status: 500 }
     );
   }
 }
+
+

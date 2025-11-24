@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
+import { PunchListItemRow, ProjectUserRow } from '@/types';
 
 export async function PUT(
   request: NextRequest,
@@ -21,13 +22,13 @@ export async function PUT(
     const body = await request.json();
 
     // Get punch item to check project access
-    const items = await query('SELECT project_id FROM punch_list_items WHERE id = ?', [id]);
+    const items = await query<PunchListItemRow>('SELECT project_id FROM punch_list_items WHERE id = ?', [id]);
     if (items.length === 0) {
       return NextResponse.json({ error: 'Punch item not found' }, { status: 404 });
     }
 
     // Verify user has access to project
-    const access = await query(
+    const access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [items[0].project_id, decoded.userId]
     );
@@ -72,10 +73,11 @@ export async function PUT(
     );
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Update punch item error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Internal server error', message: error.message },
+      { error: 'Internal server error', message: errorMessage },
       { status: 500 }
     );
   }
@@ -99,13 +101,13 @@ export async function DELETE(
     const { id } = await params;
 
     // Get punch item to check project access
-    const items = await query('SELECT project_id FROM punch_list_items WHERE id = ?', [id]);
+    const items = await query<PunchListItemRow>('SELECT project_id FROM punch_list_items WHERE id = ?', [id]);
     if (items.length === 0) {
       return NextResponse.json({ error: 'Punch item not found' }, { status: 404 });
     }
 
     // Verify user has access to project
-    const access = await query(
+    const access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [items[0].project_id, decoded.userId]
     );
@@ -117,10 +119,11 @@ export async function DELETE(
     await query('DELETE FROM punch_list_items WHERE id = ?', [id]);
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Delete punch item error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Internal server error', message: error.message },
+      { error: 'Internal server error', message: errorMessage },
       { status: 500 }
     );
   }

@@ -13,3 +13,5 @@ SELECT COUNT(*) as total_punch_items FROM punch_list_items;
 -- Check sample data
 SELECT * FROM punch_list_items LIMIT 1;
 
+
+

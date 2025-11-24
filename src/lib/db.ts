@@ -1,4 +1,6 @@
 import mysql from 'mysql2/promise';
+import { RowDataPacket, QueryResult as MySQLQueryResult } from 'mysql2';
+import { QueryParams } from '@/types';
 
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
@@ -20,11 +22,14 @@ export function getPool(): mysql.Pool {
   return pool;
 }
 
-export async function query(sql: string, params?: any[]): Promise<any> {
+export async function query<T extends RowDataPacket = RowDataPacket>(
+  sql: string,
+  params?: QueryParams
+): Promise<T[]> {
   const connection = await getPool().getConnection();
   try {
-    const [results] = await connection.execute(sql, params);
-    return results;
+    const [results] = await connection.execute<MySQLQueryResult>(sql, params);
+    return results as T[];
   } finally {
     connection.release();
   }
@@ -44,4 +49,6 @@ export async function transaction<T>(callback: (connection: mysql.PoolConnection
     connection.release();
   }
 }
+
+
 

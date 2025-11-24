@@ -2,9 +2,16 @@ export interface PDFDocument {
   id: string;
   name: string;
   url: string;
-  pageCount: number;
-  createdAt: Date;
-  updatedAt: Date;
+  file_url?: string;
+  file_path?: string;
+  file_data?: string;
+  page_count?: number;
+  pageCount?: number;
+  created_at?: Date | string;
+  updated_at?: Date | string;
+  file_size?: number;
+  createdAt?: Date;
+  updatedAt?: Date;
   size: number;
   status: 'active' | 'archived' | 'deleted';
 }
@@ -105,6 +112,7 @@ export interface Viewport {
 export interface PunchListItem {
   id: string;
   annotationId?: string;
+  documentId?: string;
   description: string;
   demarcation: string;
   demarcationId?: string; // A, B, C, D, etc.
@@ -123,10 +131,16 @@ export interface PunchListItem {
 
 export interface Project {
   id: string;
+  project_id?: string;
   name: string;
-  calibrationFactor: number;
-  scale: number;
-  inspectionNotes: string;
+  location?: string;
+  target_completion?: string;
+  company_name?: string;
+  calibration_factor?: number | string;
+  calibrationFactor?: number;
+  scale?: number;
+  project_notes?: string;
+  inspectionNotes?: string;
   createdAt: Date;
   updatedAt: Date;
 }

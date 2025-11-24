@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
+import { AnnotationRow, ProjectUserRow } from '@/types';
 
 export async function PUT(
   request: NextRequest,
@@ -22,7 +23,7 @@ export async function PUT(
     const { position, content, style, metrics, isVisible } = body;
 
     // Get annotation to check project access
-    const annotations = await query('SELECT project_id, author_id FROM annotations WHERE id = ?', [id]);
+    const annotations = await query<AnnotationRow>('SELECT project_id, author_id FROM annotations WHERE id = ?', [id]);
     if (annotations.length === 0) {
       return NextResponse.json({ error: 'Annotation not found' }, { status: 404 });
     }
@@ -30,7 +31,7 @@ export async function PUT(
     const annotation = annotations[0];
     
     // Verify user has access to project
-    const access = await query(
+    const access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [annotation.project_id, decoded.userId]
     );
@@ -114,10 +115,11 @@ export async function PUT(
     );
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Update annotation error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Internal server error', message: error.message },
+      { error: 'Internal server error', message: errorMessage },
       { status: 500 }
     );
   }
@@ -141,13 +143,13 @@ export async function DELETE(
     const { id } = await params;
 
     // Get annotation to check project access
-    const annotations = await query('SELECT project_id FROM annotations WHERE id = ?', [id]);
+    const annotations = await query<AnnotationRow>('SELECT project_id FROM annotations WHERE id = ?', [id]);
     if (annotations.length === 0) {
       return NextResponse.json({ error: 'Annotation not found' }, { status: 404 });
     }
 
     // Verify user has access to project
-    const access = await query(
+    const access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [annotations[0].project_id, decoded.userId]
     );
@@ -159,10 +161,11 @@ export async function DELETE(
     await query('DELETE FROM annotations WHERE id = ?', [id]);
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Delete annotation error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Internal server error', message: error.message },
+      { error: 'Internal server error', message: errorMessage },
       { status: 500 }
     );
   }

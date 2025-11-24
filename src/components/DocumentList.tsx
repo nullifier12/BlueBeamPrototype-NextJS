@@ -110,7 +110,7 @@ export default function DocumentList({
                         <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <Calendar size={12} />
-                            {formatDate(document.updatedAt)}
+                            {document.updatedAt ? formatDate(document.updatedAt) : 'N/A'}
                           </span>
                           <span>{formatFileSize(document.size)}</span>
                           <span>{document.pageCount} pages</span>
