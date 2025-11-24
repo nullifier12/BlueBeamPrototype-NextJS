@@ -57,7 +57,11 @@ export async function createDocument(data: Partial<PDFDocument> & {
   fileData?: string;
   pageCount?: number;
 }) {
-  return apiRequest<{ document: PDFDocument }>('/documents', {
+  return apiRequest<{ 
+    document: PDFDocument;
+    projectUuid?: string;
+    projectId?: string;
+  }>('/documents', {
     method: 'POST',
     body: JSON.stringify(data),
   });

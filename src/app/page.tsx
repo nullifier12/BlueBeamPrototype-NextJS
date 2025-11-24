@@ -384,14 +384,32 @@ export default function BlueBeamApp() {
 
   const handleAnnotationCreate = useCallback(
     async (annotation: Omit<Annotation, "id" | "createdAt" | "updatedAt">) => {
-      if (!currentProjectId || !selectedDocument) return;
+      if (!selectedDocument) {
+        console.error("❌ Cannot create annotation - no document selected");
+        return;
+      }
+      
+      // Get projectId - use currentProjectId or try to get from projectId state
+      const projectIdToUse = currentProjectId || projectId;
+      
+      if (!projectIdToUse) {
+        console.error("❌ Cannot create annotation - no project ID available", {
+          currentProjectId,
+          projectId,
+          selectedDocument: selectedDocument.name
+        });
+        alert("Please set a Project ID in the Project Details section before creating annotations.");
+        return;
+      }
+
+      console.log("✅ Creating annotation with projectId:", projectIdToUse);
 
       try {
         // Create annotation in database
         const result = await api.createAnnotation({
           ...annotation,
           documentId: selectedDocument.id,
-          projectId: currentProjectId,
+          projectId: projectIdToUse,
         });
 
         const newAnnotation = {
@@ -519,6 +537,7 @@ export default function BlueBeamApp() {
     },
     [
       currentProjectId,
+      projectId,
       selectedDocument,
       punchItems.length,
       handlePunchItemCreate,
@@ -702,9 +721,16 @@ export default function BlueBeamApp() {
       }
 
       // Update currentProjectId if we're using projectId from input
-      if (!currentProjectId && projectId && projectId.trim() !== '') {
-        console.log("✅ Setting currentProjectId from projectId input:", projectId.trim());
-        setCurrentProjectId(projectId.trim());
+      // This is CRITICAL - without currentProjectId, annotations won't work!
+      if (!currentProjectId) {
+        if (projectId && projectId.trim() !== '') {
+          console.log("✅ Setting currentProjectId from projectId input:", projectId.trim());
+          setCurrentProjectId(projectId.trim());
+        } else if (projectIdToUse) {
+          // Also set it from projectIdToUse if currentProjectId is still not set
+          console.log("✅ Setting currentProjectId from projectIdToUse:", projectIdToUse);
+          setCurrentProjectId(projectIdToUse);
+        }
       }
 
       try {
@@ -735,22 +761,104 @@ export default function BlueBeamApp() {
         });
 
         console.log("✅ Document uploaded successfully:", result.document);
+        console.log("📦 Server response includes:", {
+          hasProjectUuid: !!result.projectUuid,
+          projectUuid: result.projectUuid,
+          projectId: result.projectId
+        });
 
-        const doc = {
-          ...newDocument,
+        // Update currentProjectId if server returned a project UUID
+        // This is CRITICAL - when user is auto-assigned to a project, we need to update currentProjectId
+        // so that annotations and other operations work without requiring re-login
+        if (result.projectUuid) {
+          if (result.projectUuid !== currentProjectId) {
+            console.log("🔄 Updating currentProjectId from server response:", {
+              old: currentProjectId,
+              new: result.projectUuid,
+              reason: "User was auto-assigned to project or project was created"
+            });
+            setCurrentProjectId(result.projectUuid);
+          }
+        } else if (result.projectId && !currentProjectId) {
+          // Fallback: If we got a projectId but no projectUuid, use the projectId
+          // This can work because APIs accept both UUID and human-readable IDs
+          console.log("🔄 Setting currentProjectId from projectId (fallback):", result.projectId);
+          setCurrentProjectId(result.projectId);
+        }
+
+        // Use the original blob URL from the upload - it's already valid and ready
+        // We'll only convert from base64 if the original URL is not available
+        let docUrl = newDocument.url; // Original blob URL from FileUpload component
+        
+        // Only convert from base64 if we don't have the original blob URL
+        if (!docUrl && result.document.file_data) {
+          try {
+            console.log("Converting base64 to blob URL for newly uploaded document:", result.document.name);
+            const base64Data = result.document.file_data;
+            
+            // Handle base64 string (remove data URL prefix if present)
+            const cleanBase64 = base64Data.includes(",")
+              ? base64Data.split(",")[1]
+              : base64Data;
+
+            const binaryString = atob(cleanBase64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: "application/pdf" });
+            docUrl = URL.createObjectURL(blob);
+            console.log("Successfully created blob URL from base64:", docUrl.substring(0, 50) + "...");
+          } catch (error) {
+            console.error("Error converting base64 to blob for new document:", error);
+            // Fallback to file_url or file_path
+            docUrl = result.document.file_url || result.document.file_path || "";
+          }
+        } else if (!docUrl && result.document.file_url) {
+          docUrl = result.document.file_url;
+        } else if (!docUrl && result.document.file_path) {
+          docUrl = result.document.file_path;
+        }
+        
+        console.log("📄 Final document URL:", docUrl ? docUrl.substring(0, 50) + "..." : "MISSING!");
+
+        const doc: PDFDocument = {
           id: result.document.id,
+          name: result.document.name || newDocument.name,
+          url: docUrl || newDocument.url || "",
+          pageCount: result.document.page_count || newDocument.pageCount || 0,
           createdAt: result.document.createdAt || (result.document.created_at ? new Date(result.document.created_at) : new Date()),
           updatedAt: result.document.updatedAt || (result.document.updated_at ? new Date(result.document.updated_at) : new Date()),
+          size: result.document.file_size || newDocument.size || 0,
+          status: result.document.status || "active",
         };
+
+        if (!doc.url) {
+          console.error("❌ No valid URL for uploaded document:", doc.name);
+        } else {
+          console.log("✅ Document URL ready:", doc.url.substring(0, 50) + "...");
+        }
 
         setDocuments((prev) => [doc, ...prev]);
         console.log("📋 Document added to list, closing modal...");
         setShowUploadModal(false); // Close modal first
-        // Set selected document after modal closes to avoid conflicts
-        setTimeout(() => {
-          console.log("🎯 Setting selected document:", doc.name);
-          setSelectedDocument(doc);
-        }, 100);
+        
+        // Ensure document has valid URL before selecting
+        if (!doc.url) {
+          console.error("❌ Cannot select document - no valid URL");
+          alert("Document uploaded but URL is missing. Please reload the page.");
+          return;
+        }
+        
+        // Set selected document immediately - don't wait
+        // The PDFViewer will handle loading
+        console.log("🎯 Setting selected document:", doc.name);
+        console.log("🎯 Document URL:", doc.url ? doc.url.substring(0, 50) + "..." : "MISSING!");
+        console.log("🎯 Document ID:", doc.id);
+        console.log("🎯 Current Project ID:", currentProjectId);
+        setSelectedDocument(doc);
+        // Reset viewport to first page
+        setViewport((prev) => ({ ...prev, page: 1 }));
       } catch (error) {
         console.error("❌ Error uploading document:", error);
         console.error("Error details:", {

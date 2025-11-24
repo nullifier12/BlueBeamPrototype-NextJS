@@ -464,10 +464,14 @@ export default function PDFViewer({
       });
       const pdf = await loadingTask.promise;
 
-      console.log("PDF document loaded:", pdf);
+      console.log("✅ PDF document loaded successfully:", {
+        numPages: pdf.numPages,
+        pdfDoc: !!pdf
+      });
       setPdfDoc(pdf);
       setNumPages(pdf.numPages);
       setIsLoading(false);
+      console.log("✅ PDF state updated - pdfDoc is now available for drawing");
 
       // Clear timeout on success
       clearTimeout(timeout);
@@ -1058,12 +1062,35 @@ export default function PDFViewer({
         return;
       }
 
+      // Check if PDF is loaded
+      if (!pdfDoc) {
+        console.warn(
+          "❌ PDF not loaded yet - pdfDoc is null",
+          {
+            documentUrl: documentUrl?.substring(0, 50),
+            isLoading,
+            hasPdfjsLib: !!window.pdfjsLib,
+            numPages
+          }
+        );
+        // Don't show alert on every click, just log
+        console.log("Please wait for the PDF to finish loading before drawing.");
+        return;
+      }
+      
+      console.log("✅ PDF is loaded, allowing drawing", {
+        pdfDoc: !!pdfDoc,
+        numPages,
+        activeTool
+      });
+
       // Ensure SVG overlay is properly sized before allowing drawing
       const rect = svgOverlayRef.current.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) {
         console.warn(
           "SVG overlay not ready for drawing, please wait for PDF to load"
         );
+        alert("Please wait for the PDF to finish rendering before drawing.");
         return;
       }
 
@@ -1269,6 +1296,11 @@ export default function PDFViewer({
       currentUser,
       onAnnotationCreate,
       isPointerDown,
+      pdfDoc,
+      isDrawingArc,
+      arcPhase,
+      arcStartPoint,
+      arcCenter,
     ]
   );
 
@@ -1753,6 +1785,14 @@ export default function PDFViewer({
             <div className="text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
               <p className="text-muted-foreground">Loading PDF...</p>
+              <p className="text-xs text-muted-foreground mt-2">Please wait before drawing</p>
+            </div>
+          </div>
+        ) : !pdfDoc ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-muted-foreground">Preparing PDF...</p>
             </div>
           </div>
         ) : (

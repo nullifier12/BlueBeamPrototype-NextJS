@@ -145,7 +145,20 @@ export async function POST(request: NextRequest) {
     );
 
     const documents = await query<DocumentRow>('SELECT * FROM documents WHERE id = ?', [id]);
-    return NextResponse.json({ document: documents[0] }, { status: 201 });
+    
+    // Get the human-readable project_id from the project
+    const projectInfo = await query<ProjectRow>(
+      'SELECT project_id FROM projects WHERE id = ?',
+      [projectUuid]
+    );
+    const humanReadableProjectId = projectInfo[0]?.project_id || projectId;
+    
+    // Return the document along with the project UUID so frontend can update currentProjectId
+    return NextResponse.json({ 
+      document: documents[0],
+      projectUuid: projectUuid,
+      projectId: humanReadableProjectId // Return the human-readable project ID
+    }, { status: 201 });
   } catch (error) {
     console.error('Create document error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

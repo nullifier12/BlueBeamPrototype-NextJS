@@ -84,6 +84,7 @@ export interface DocumentRow extends RowDataPacket {
 
 export interface ProjectRow extends RowDataPacket {
   id: string;
+  project_id?: string;
   name: string;
   calibration_factor: number | string;
   scale: number | string;
