@@ -31,7 +31,7 @@ export default function FileUpload({
     }
 
     setUploading(true);
-    console.log("⏳ Starting file conversion to base64...");
+    console.log("⏳ Starting file conversion to base64 and page count detection...");
 
     try {
       // Convert file to base64 for storage
@@ -51,6 +51,30 @@ export default function FileUpload({
         reader.readAsDataURL(file);
       });
 
+      // Detect page count using PDF.js
+      let pageCount = 1; // Default to 1 if detection fails
+      try {
+        if (typeof window !== 'undefined' && window.pdfjsLib) {
+          console.log("📄 Detecting PDF page count...");
+          const arrayBuffer = await file.arrayBuffer();
+          const pdfData = new Uint8Array(arrayBuffer);
+          
+          const loadingTask = window.pdfjsLib.getDocument(pdfData, {
+            cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
+            cMapPacked: true,
+          });
+          
+          const pdf = await loadingTask.promise;
+          pageCount = pdf.numPages;
+          console.log(`✅ PDF has ${pageCount} page(s)`);
+        } else {
+          console.warn("⚠️ PDF.js not available, using default page count of 1");
+        }
+      } catch (pageCountError) {
+        console.error("❌ Error detecting page count:", pageCountError);
+        console.warn("⚠️ Using default page count of 1");
+      }
+
       // Create object URL for immediate display
       const fileUrl = URL.createObjectURL(file);
       console.log("🔗 Created blob URL:", fileUrl.substring(0, 50) + "...");
@@ -66,7 +90,7 @@ export default function FileUpload({
         id: documentId,
         name: file.name,
         url: fileUrl,
-        pageCount: 1, // We'll update this when the PDF loads
+        pageCount: pageCount, // Use detected page count
         createdAt: now,
         updatedAt: now,
         size: file.size,
@@ -78,6 +102,7 @@ export default function FileUpload({
       console.log("📤 Calling onDocumentUpload with document:", {
         name: newDocument.name,
         hasBase64: !!base64,
+        pageCount: newDocument.pageCount,
         url: newDocument.url.substring(0, 50) + "...",
       });
 
