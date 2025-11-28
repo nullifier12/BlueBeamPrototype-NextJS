@@ -4,6 +4,10 @@ import { verifyToken } from '@/lib/auth';
 import { randomUUID } from 'crypto';
 import { ProjectRow, DocumentRow, ProjectUserRow } from '@/types';
 
+// Allow longer processing time for large file uploads
+export const maxDuration = 300; // 5 minutes
+export const runtime = 'nodejs';
+
 export async function GET(request: NextRequest) {
   try {
     const token = request.cookies.get('auth_token')?.value;

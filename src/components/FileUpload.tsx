@@ -56,13 +56,19 @@ export default function FileUpload({
       console.log("🔗 Created blob URL:", fileUrl.substring(0, 50) + "...");
 
       // Create PDF document object with base64 data
+      // Use crypto.randomUUID() for consistent ID generation (client-side only)
+      const documentId = typeof window !== 'undefined' 
+        ? crypto.randomUUID() 
+        : `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      const now = new Date();
       const newDocument: PDFDocument = {
-        id: Date.now().toString(),
+        id: documentId,
         name: file.name,
         url: fileUrl,
         pageCount: 1, // We'll update this when the PDF loads
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: now,
+        updatedAt: now,
         size: file.size,
         status: "active",
         // Store base64 for database
@@ -165,7 +171,7 @@ export default function FileUpload({
                   </label>
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Supports PDF files up to 50MB
+                  Upload PDF files of any size
                 </p>
               </div>
 
