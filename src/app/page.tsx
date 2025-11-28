@@ -21,7 +21,9 @@ import * as api from "@/lib/api";
 export default function BlueBeamApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [currentProjectId, setCurrentProjectId] = useState<string | undefined>(undefined);
+  const [currentProjectId, setCurrentProjectId] = useState<string | undefined>(
+    undefined
+  );
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
   const [selectedDocument, setSelectedDocument] = useState<PDFDocument | null>(
     null
@@ -55,7 +57,7 @@ export default function BlueBeamApp() {
         if (session.success && session.user) {
           console.log("✅ Session restored:", {
             user: session.user.name,
-            projectId: session.projectId || "NOT PROVIDED"
+            projectId: session.projectId || "NOT PROVIDED",
           });
           setCurrentUser(session.user);
           if (session.projectId) {
@@ -74,10 +76,10 @@ export default function BlueBeamApp() {
 
   // Load project data when authenticated
   useEffect(() => {
-    console.log("🔄 useEffect check:", { 
-      isAuthenticated, 
+    console.log("🔄 useEffect check:", {
+      isAuthenticated,
       currentProjectId,
-      willLoad: isAuthenticated && !!currentProjectId 
+      willLoad: isAuthenticated && !!currentProjectId,
     });
     if (isAuthenticated && currentProjectId) {
       loadProjectData();
@@ -99,11 +101,11 @@ export default function BlueBeamApp() {
         setProjectTargetCompletion(p.target_completion || "");
         setCompanyName(p.company_name || "");
         setCalibrationFactor(
-          p.calibration_factor 
-            ? (typeof p.calibration_factor === 'number' 
-                ? p.calibration_factor 
+          p.calibration_factor
+            ? (typeof p.calibration_factor === "number"
+                ? p.calibration_factor
                 : parseFloat(p.calibration_factor)) || 1.0
-            : (p.calibrationFactor || 1.0)
+            : p.calibrationFactor || 1.0
         );
         setProjectNotes(p.project_notes || "");
       }
@@ -163,19 +165,29 @@ export default function BlueBeamApp() {
           name: doc.name,
           url: url || "",
           pageCount: doc.page_count || 0,
-          createdAt: doc.createdAt || (doc.created_at ? new Date(doc.created_at) : new Date()),
-          updatedAt: doc.updatedAt || (doc.updated_at ? new Date(doc.updated_at) : new Date()),
+          createdAt:
+            doc.createdAt ||
+            (doc.created_at ? new Date(doc.created_at) : new Date()),
+          updatedAt:
+            doc.updatedAt ||
+            (doc.updated_at ? new Date(doc.updated_at) : new Date()),
           size: doc.file_size || 0,
           status: doc.status || "active",
         };
       });
       setDocuments(transformedDocs);
       console.log("Loaded documents:", transformedDocs.length);
-      
+
       // Auto-select first document if only one exists and it has a valid URL
       if (transformedDocs.length === 1 && transformedDocs[0].url) {
-        console.log("📄 Auto-selecting single document:", transformedDocs[0].name);
-        console.log("📄 Document URL:", transformedDocs[0].url.substring(0, 50) + "...");
+        console.log(
+          "📄 Auto-selecting single document:",
+          transformedDocs[0].name
+        );
+        console.log(
+          "📄 Document URL:",
+          transformedDocs[0].url.substring(0, 50) + "..."
+        );
         setSelectedDocument(transformedDocs[0]);
         setViewport((prev) => ({ ...prev, page: 1 }));
       }
@@ -207,23 +219,25 @@ export default function BlueBeamApp() {
   };
 
   const handleLoginSuccess = useCallback((user: User, projectId?: string) => {
-    console.log("🔐 Login successful:", { 
+    console.log("🔐 Login successful:", {
       name: user.name,
-      email: user.email, 
-      projectId: projectId || "NOT PROVIDED" 
+      email: user.email,
+      projectId: projectId || "NOT PROVIDED",
     });
-    
+
     setCurrentUser(user);
-    
+
     if (projectId) {
       setCurrentProjectId(projectId);
       console.log("✅ Project ID set:", projectId);
     } else {
-      console.warn("⚠️ No project ID provided in login. User needs to select a project.");
+      console.warn(
+        "⚠️ No project ID provided in login. User needs to select a project."
+      );
       // If no project ID, user needs to manually enter one or select from list
       // For now, we'll require project ID for uploads
     }
-    
+
     setIsAuthenticated(true);
   }, []);
 
@@ -413,17 +427,19 @@ export default function BlueBeamApp() {
         console.error("❌ Cannot create annotation - no document selected");
         return;
       }
-      
+
       // Get projectId - use currentProjectId or try to get from projectId state
       const projectIdToUse = currentProjectId || projectId;
-      
+
       if (!projectIdToUse) {
         console.error("❌ Cannot create annotation - no project ID available", {
           currentProjectId,
           projectId,
-          selectedDocument: selectedDocument.name
+          selectedDocument: selectedDocument.name,
         });
-        alert("Please set a Project ID in the Project Details section before creating annotations.");
+        alert(
+          "Please set a Project ID in the Project Details section before creating annotations."
+        );
         return;
       }
 
@@ -732,15 +748,17 @@ export default function BlueBeamApp() {
       });
 
       // Use currentProjectId if available, otherwise use projectId from Project Details input
-      const projectIdToUse = currentProjectId || (projectId && projectId.trim() !== '' ? projectId.trim() : null);
-      
+      const projectIdToUse =
+        currentProjectId ||
+        (projectId && projectId.trim() !== "" ? projectId.trim() : null);
+
       if (!projectIdToUse) {
         console.error("❌ No project ID found, cannot upload");
         alert(
           "No project ID found. Please:\n" +
-          "1. Enter a Project ID in the Project Details section (e.g., PROJ-001), OR\n" +
-          "2. Logout and login again with a Project ID, OR\n" +
-          "3. Contact your administrator to assign you to a project."
+            "1. Enter a Project ID in the Project Details section (e.g., PROJ-001), OR\n" +
+            "2. Logout and login again with a Project ID, OR\n" +
+            "3. Contact your administrator to assign you to a project."
         );
         return;
       }
@@ -748,12 +766,18 @@ export default function BlueBeamApp() {
       // Update currentProjectId if we're using projectId from input
       // This is CRITICAL - without currentProjectId, annotations won't work!
       if (!currentProjectId) {
-        if (projectId && projectId.trim() !== '') {
-          console.log("✅ Setting currentProjectId from projectId input:", projectId.trim());
+        if (projectId && projectId.trim() !== "") {
+          console.log(
+            "✅ Setting currentProjectId from projectId input:",
+            projectId.trim()
+          );
           setCurrentProjectId(projectId.trim());
         } else if (projectIdToUse) {
           // Also set it from projectIdToUse if currentProjectId is still not set
-          console.log("✅ Setting currentProjectId from projectIdToUse:", projectIdToUse);
+          console.log(
+            "✅ Setting currentProjectId from projectIdToUse:",
+            projectIdToUse
+          );
           setCurrentProjectId(projectIdToUse);
         }
       }
@@ -761,7 +785,7 @@ export default function BlueBeamApp() {
       try {
         // Get base64 from document (added by FileUpload component)
         const base64 = newDocument.base64;
-        
+
         if (!base64) {
           console.error("❌ No base64 data in document");
           alert("Error: Document data is missing. Please try uploading again.");
@@ -789,7 +813,7 @@ export default function BlueBeamApp() {
         console.log("📦 Server response includes:", {
           hasProjectUuid: !!result.projectUuid,
           projectUuid: result.projectUuid,
-          projectId: result.projectId
+          projectId: result.projectId,
         });
 
         // Update currentProjectId if server returned a project UUID
@@ -800,27 +824,34 @@ export default function BlueBeamApp() {
             console.log("🔄 Updating currentProjectId from server response:", {
               old: currentProjectId,
               new: result.projectUuid,
-              reason: "User was auto-assigned to project or project was created"
+              reason:
+                "User was auto-assigned to project or project was created",
             });
             setCurrentProjectId(result.projectUuid);
           }
         } else if (result.projectId && !currentProjectId) {
           // Fallback: If we got a projectId but no projectUuid, use the projectId
           // This can work because APIs accept both UUID and human-readable IDs
-          console.log("🔄 Setting currentProjectId from projectId (fallback):", result.projectId);
+          console.log(
+            "🔄 Setting currentProjectId from projectId (fallback):",
+            result.projectId
+          );
           setCurrentProjectId(result.projectId);
         }
 
         // Use the original blob URL from the upload - it's already valid and ready
         // We'll only convert from base64 if the original URL is not available
         let docUrl = newDocument.url; // Original blob URL from FileUpload component
-        
+
         // Only convert from base64 if we don't have the original blob URL
         if (!docUrl && result.document.file_data) {
           try {
-            console.log("Converting base64 to blob URL for newly uploaded document:", result.document.name);
+            console.log(
+              "Converting base64 to blob URL for newly uploaded document:",
+              result.document.name
+            );
             const base64Data = result.document.file_data;
-            
+
             // Handle base64 string (remove data URL prefix if present)
             const cleanBase64 = base64Data.includes(",")
               ? base64Data.split(",")[1]
@@ -833,27 +864,45 @@ export default function BlueBeamApp() {
             }
             const blob = new Blob([bytes], { type: "application/pdf" });
             docUrl = URL.createObjectURL(blob);
-            console.log("Successfully created blob URL from base64:", docUrl.substring(0, 50) + "...");
+            console.log(
+              "Successfully created blob URL from base64:",
+              docUrl.substring(0, 50) + "..."
+            );
           } catch (error) {
-            console.error("Error converting base64 to blob for new document:", error);
+            console.error(
+              "Error converting base64 to blob for new document:",
+              error
+            );
             // Fallback to file_url or file_path
-            docUrl = result.document.file_url || result.document.file_path || "";
+            docUrl =
+              result.document.file_url || result.document.file_path || "";
           }
         } else if (!docUrl && result.document.file_url) {
           docUrl = result.document.file_url;
         } else if (!docUrl && result.document.file_path) {
           docUrl = result.document.file_path;
         }
-        
-        console.log("📄 Final document URL:", docUrl ? docUrl.substring(0, 50) + "..." : "MISSING!");
+
+        console.log(
+          "📄 Final document URL:",
+          docUrl ? docUrl.substring(0, 50) + "..." : "MISSING!"
+        );
 
         const doc: PDFDocument = {
           id: result.document.id,
           name: result.document.name || newDocument.name,
           url: docUrl || newDocument.url || "",
           pageCount: result.document.page_count || newDocument.pageCount || 0,
-          createdAt: result.document.createdAt || (result.document.created_at ? new Date(result.document.created_at) : new Date()),
-          updatedAt: result.document.updatedAt || (result.document.updated_at ? new Date(result.document.updated_at) : new Date()),
+          createdAt:
+            result.document.createdAt ||
+            (result.document.created_at
+              ? new Date(result.document.created_at)
+              : new Date()),
+          updatedAt:
+            result.document.updatedAt ||
+            (result.document.updated_at
+              ? new Date(result.document.updated_at)
+              : new Date()),
           size: result.document.file_size || newDocument.size || 0,
           status: result.document.status || "active",
         };
@@ -861,24 +910,32 @@ export default function BlueBeamApp() {
         if (!doc.url) {
           console.error("❌ No valid URL for uploaded document:", doc.name);
         } else {
-          console.log("✅ Document URL ready:", doc.url.substring(0, 50) + "...");
+          console.log(
+            "✅ Document URL ready:",
+            doc.url.substring(0, 50) + "..."
+          );
         }
 
         setDocuments((prev) => [doc, ...prev]);
         console.log("📋 Document added to list, closing modal...");
         setShowUploadModal(false); // Close modal first
-        
+
         // Ensure document has valid URL before selecting
         if (!doc.url) {
           console.error("❌ Cannot select document - no valid URL");
-          alert("Document uploaded but URL is missing. Please reload the page.");
+          alert(
+            "Document uploaded but URL is missing. Please reload the page."
+          );
           return;
         }
-        
+
         // Set selected document immediately - don't wait
         // The PDFViewer will handle loading
         console.log("🎯 Setting selected document:", doc.name);
-        console.log("🎯 Document URL:", doc.url ? doc.url.substring(0, 50) + "..." : "MISSING!");
+        console.log(
+          "🎯 Document URL:",
+          doc.url ? doc.url.substring(0, 50) + "..." : "MISSING!"
+        );
         console.log("🎯 Document ID:", doc.id);
         console.log("🎯 Current Project ID:", currentProjectId);
         setSelectedDocument(doc);
@@ -890,7 +947,9 @@ export default function BlueBeamApp() {
           message: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
         });
-        alert("Error uploading document. Please try again. Check console for details.");
+        alert(
+          "Error uploading document. Please try again. Check console for details."
+        );
         // Keep modal open on error so user can try again
       }
     },
@@ -975,7 +1034,7 @@ export default function BlueBeamApp() {
     try {
       await api.logout();
       console.log("✅ Logout successful");
-      
+
       // Clear all state
       setIsAuthenticated(false);
       setCurrentUser(null);
@@ -1103,7 +1162,7 @@ export default function BlueBeamApp() {
             <div className="flex-1 flex items-center justify-center bg-muted">
               <div className="text-center">
                 <h2 className="text-2xl font-semibold mb-4">
-                  Welcome to BlueBeam Prototype
+                  Welcome to Markup Inspection Tool
                 </h2>
                 <p className="text-muted-foreground mb-6">
                   Select a document from the sidebar to get started with PDF
