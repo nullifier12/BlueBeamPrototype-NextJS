@@ -5,6 +5,7 @@ import { verifyPassword } from "@/lib/auth";
 import { UserRow, ProjectRow } from "@/types";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true, // Required for NextAuth v5 in production
   providers: [
     Credentials({
       name: "Credentials",
@@ -44,6 +45,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // If projectId is provided, verify user has access to it
           let projectId: string | undefined;
           if (credentials.projectId) {
+            const projectIdValue = credentials.projectId as string;
             const projectAccess = await query<
               ProjectRow & { project_id: string }
             >(
@@ -51,7 +53,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                FROM projects p
                INNER JOIN project_users pu ON p.id = pu.project_id
                WHERE pu.user_id = ? AND (p.project_id = ? OR p.id = ?)`,
-              [user.id, credentials.projectId, credentials.projectId]
+              [user.id, projectIdValue, projectIdValue]
             );
 
             if (projectAccess.length > 0) {
