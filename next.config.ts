@@ -1,11 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["3.26.147.150", "localhost", "127.0.0.1"],
   /* config options here */
   // Allow very large file uploads (500MB - can be increased if needed)
   experimental: {
     serverActions: {
-      bodySizeLimit: '500mb',
+      bodySizeLimit: "500mb",
     },
   },
   // Hide error overlay and disable ESLint during builds
