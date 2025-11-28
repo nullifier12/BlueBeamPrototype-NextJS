@@ -80,13 +80,26 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get('auth_token')?.value;
+    console.log('📥 POST /api/documents - Token check:', {
+      hasToken: !!token,
+      tokenLength: token?.length,
+    });
+    
     if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      console.error('❌ No auth token in cookies');
+      return NextResponse.json({ error: 'Unauthorized - No token' }, { status: 401 });
     }
 
     const decoded = verifyToken(token);
+    console.log('🔐 Token verification:', {
+      decoded: !!decoded,
+      userId: decoded?.userId,
+      username: decoded?.username
+    });
+    
     if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+      console.error('❌ Invalid or expired token');
+      return NextResponse.json({ error: 'Unauthorized - Invalid token' }, { status: 401 });
     }
 
     const body = await request.json();
