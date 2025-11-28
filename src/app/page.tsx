@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useEffect } from "react";
+import { useSession, signOut } from "next-auth/react";
 import Toolbar from "@/components/Toolbar";
 import ProjectLeftPanel from "@/components/ProjectLeftPanel";
 import PDFViewer from "@/components/PDFViewer";
@@ -19,6 +20,7 @@ import {
 import * as api from "@/lib/api";
 
 export default function BlueBeamApp() {
+  const { data: session, status } = useSession();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | undefined>(
@@ -49,30 +51,33 @@ export default function BlueBeamApp() {
     scrollY: 0,
   });
 
-  // Check for existing session on mount
+  // Sync NextAuth session with local state
   useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const session = await api.getCurrentSession();
-        if (session.success && session.user) {
-          console.log("✅ Session restored:", {
-            user: session.user.name,
-            projectId: session.projectId || "NOT PROVIDED",
-          });
-          setCurrentUser(session.user);
-          if (session.projectId) {
-            setCurrentProjectId(session.projectId);
-          }
-          setIsAuthenticated(true);
-        }
-      } catch (error) {
-        console.log("ℹ️ No existing session found");
-        // Session doesn't exist or is invalid, user needs to login
-      }
-    };
+    if (status === "loading") return;
 
-    checkSession();
-  }, []);
+    if (session?.user) {
+      const user: User = {
+        id: session.user.id,
+        username: session.user.username,
+        name: session.user.name || "",
+        email: session.user.email || "",
+        color: session.user.color,
+      };
+      setCurrentUser(user);
+      if (session.projectId) {
+        setCurrentProjectId(session.projectId);
+      }
+      setIsAuthenticated(true);
+      console.log("✅ NextAuth session active:", {
+        user: user.name,
+        projectId: session.projectId || "NOT PROVIDED",
+      });
+    } else {
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      setCurrentProjectId(undefined);
+    }
+  }, [session, status]);
 
   // Load project data when authenticated
   useEffect(() => {
@@ -761,6 +766,8 @@ export default function BlueBeamApp() {
         currentProjectId,
         projectId,
         documentSize: newDocument.size,
+        isAuthenticated,
+        hasUser: !!currentUser,
       });
 
       // Use currentProjectId if available, otherwise use projectId from Project Details input
@@ -1060,7 +1067,8 @@ export default function BlueBeamApp() {
 
   const handleLogout = useCallback(async () => {
     try {
-      await api.logout();
+      // Use NextAuth signOut to properly clear session
+      await signOut({ redirect: false });
       console.log("✅ Logout successful");
 
       // Clear all state
@@ -1084,8 +1092,12 @@ export default function BlueBeamApp() {
       setIsAuthenticated(false);
       setCurrentUser(null);
       setCurrentProjectId(undefined);
+      setDocuments([]);
+      setSelectedDocument(null);
+      setAnnotations([]);
+      setPunchItems([]);
     }
-  }, []);
+  }, [signOut]);
 
   if (!isAuthenticated) {
     return (

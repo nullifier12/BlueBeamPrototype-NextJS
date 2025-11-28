@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '../../auth/[...nextauth]/route';
 import { query } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
 import { randomUUID } from 'crypto';
 import { ProjectRow, ProjectUserRow } from '@/types';
 
@@ -9,14 +9,9 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const token = request.cookies.get('auth_token')?.value;
-    if (!token) {
+    const session = await auth();
+    if (!session || !session.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
     const { projectId } = await params;
@@ -37,7 +32,7 @@ export async function GET(
     // Verify user has access
     let access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [project.id, decoded.userId]
+      [project.id, session.user.id]
     );
 
     // Auto-assign user to project as a member if they don't have access
@@ -46,13 +41,13 @@ export async function GET(
       const assignId = randomUUID();
       await query(
         'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
-        [assignId, project.id, decoded.userId, 'member']
+        [assignId, project.id, session.user.id, 'member']
       );
-      console.log(`Auto-assigned user ${decoded.userId} to project ${project.id} as member`);
+      console.log(`Auto-assigned user ${session.user.id} to project ${project.id} as member`);
       // Re-fetch access to include the new assignment
       access = await query<ProjectUserRow>(
         'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-        [project.id, decoded.userId]
+        [project.id, session.user.id]
       );
     }
 
@@ -72,14 +67,9 @@ export async function PUT(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const token = request.cookies.get('auth_token')?.value;
-    if (!token) {
+    const session = await auth();
+    if (!session || !session.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
     const { projectId } = await params;

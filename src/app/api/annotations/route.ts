@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '../auth/[...nextauth]/route';
 import { query } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
 import { randomUUID } from 'crypto';
 import { ProjectUserRow, ProjectRow } from '@/types';
 import { AnnotationRow } from '@/types';
@@ -37,14 +37,9 @@ function safeParseFloat(value: number | string | null | undefined): number {
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get('auth_token')?.value;
-    if (!token) {
+    const session = await auth();
+    if (!session || !session.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -70,7 +65,7 @@ export async function GET(request: NextRequest) {
     // Verify user has access to project
     let access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [projectUuid, decoded.userId]
+      [projectUuid, session.user.id]
     );
 
     // Auto-assign user to project as a member if they don't have access
@@ -78,13 +73,13 @@ export async function GET(request: NextRequest) {
       const assignId = randomUUID();
       await query(
         'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
-        [assignId, projectUuid, decoded.userId, 'member']
+        [assignId, projectUuid, session.user.id, 'member']
       );
-      console.log(`Auto-assigned user ${decoded.userId} to project ${projectUuid} as member`);
+      console.log(`Auto-assigned user ${session.user.id} to project ${projectUuid} as member`);
       // Re-fetch access
       access = await query<ProjectUserRow>(
         'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-        [projectUuid, decoded.userId]
+        [projectUuid, session.user.id]
       );
     }
 
@@ -182,15 +177,14 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.cookies.get('auth_token')?.value;
-    if (!token) {
+    // In NextAuth v5, pass the request to auth()
+    const session = await auth();
+    if (!session || !session.user) {
+      console.error("❌ No session in annotations POST:", { hasSession: !!session });
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    
+    console.log("✅ Session found in annotations POST:", { userId: session.user.id });
 
     const body = await request.json();
     const { documentId, projectId, type, page, position, content, style, metrics } = body;
@@ -217,7 +211,7 @@ export async function POST(request: NextRequest) {
     // Verify user has access to project
     let access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [projectUuid, decoded.userId]
+      [projectUuid, session.user.id]
     );
 
     // Auto-assign user to project as a member if they don't have access
@@ -225,9 +219,9 @@ export async function POST(request: NextRequest) {
       const assignId = randomUUID();
       await query(
         'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
-        [assignId, projectUuid, decoded.userId, 'member']
+        [assignId, projectUuid, session.user.id, 'member']
       );
-      console.log(`Auto-assigned user ${decoded.userId} to project ${projectUuid} as member`);
+      console.log(`Auto-assigned user ${session.user.id} to project ${projectUuid} as member`);
     }
 
     const id = randomUUID();
@@ -281,7 +275,7 @@ export async function POST(request: NextRequest) {
         metrics?.area_px || null,
         metrics?.length_px || null,
         metrics?.text || null,
-        decoded.userId,
+        session.user.id,
         true,
       ]
     );

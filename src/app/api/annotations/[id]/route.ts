@@ -1,21 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
-import { AnnotationRow, ProjectUserRow } from '@/types';
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "../../auth/[...nextauth]/route";
+import { query } from "@/lib/db";
+import { AnnotationRow, ProjectUserRow } from "@/types";
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const token = request.cookies.get('auth_token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    const session = await auth();
+    if (!session || !session.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { id } = await params;
@@ -23,21 +18,30 @@ export async function PUT(
     const { position, content, style, metrics, isVisible } = body;
 
     // Get annotation to check project access
-    const annotations = await query<AnnotationRow>('SELECT project_id, author_id FROM annotations WHERE id = ?', [id]);
+    const annotations = await query<AnnotationRow>(
+      "SELECT project_id, author_id FROM annotations WHERE id = ?",
+      [id]
+    );
     if (annotations.length === 0) {
-      return NextResponse.json({ error: 'Annotation not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: "Annotation not found" },
+        { status: 404 }
+      );
     }
 
     const annotation = annotations[0];
-    
+
     // Verify user has access to project
     const access = await query<ProjectUserRow>(
-      'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [annotation.project_id, decoded.userId]
+      "SELECT role FROM project_users WHERE project_id = ? AND user_id = ?",
+      [annotation.project_id, session.user.id]
     );
 
     if (access.length === 0) {
-      return NextResponse.json({ error: 'No access to project' }, { status: 403 });
+      return NextResponse.json(
+        { error: "No access to project" },
+        { status: 403 }
+      );
     }
 
     // Update annotation
@@ -116,10 +120,11 @@ export async function PUT(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Update annotation error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error("Update annotation error:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
-      { error: 'Internal server error', message: errorMessage },
+      { error: "Internal server error", message: errorMessage },
       { status: 500 }
     );
   }
@@ -130,44 +135,48 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const token = request.cookies.get('auth_token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    const session = await auth();
+    if (!session || !session.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { id } = await params;
 
     // Get annotation to check project access
-    const annotations = await query<AnnotationRow>('SELECT project_id FROM annotations WHERE id = ?', [id]);
+    const annotations = await query<AnnotationRow>(
+      "SELECT project_id FROM annotations WHERE id = ?",
+      [id]
+    );
     if (annotations.length === 0) {
-      return NextResponse.json({ error: 'Annotation not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: "Annotation not found" },
+        { status: 404 }
+      );
     }
 
     // Verify user has access to project
     const access = await query<ProjectUserRow>(
-      'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [annotations[0].project_id, decoded.userId]
+      "SELECT role FROM project_users WHERE project_id = ? AND user_id = ?",
+      [annotations[0].project_id, session.user.id]
     );
 
     if (access.length === 0) {
-      return NextResponse.json({ error: 'No access to project' }, { status: 403 });
+      return NextResponse.json(
+        { error: "No access to project" },
+        { status: 403 }
+      );
     }
 
-    await query('DELETE FROM annotations WHERE id = ?', [id]);
+    await query("DELETE FROM annotations WHERE id = ?", [id]);
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Delete annotation error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error("Delete annotation error:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
-      { error: 'Internal server error', message: errorMessage },
+      { error: "Internal server error", message: errorMessage },
       { status: 500 }
     );
   }
 }
-

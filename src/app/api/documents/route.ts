@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "../auth/[...nextauth]/route";
 import { query } from "@/lib/db";
-import { verifyToken } from "@/lib/auth";
 import { randomUUID } from "crypto";
 import { ProjectRow, DocumentRow, ProjectUserRow } from "@/types";
 
@@ -10,14 +10,9 @@ export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth_token")?.value;
-    if (!token) {
+    const session = await auth();
+    if (!session || !session.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -46,7 +41,7 @@ export async function GET(request: NextRequest) {
     // Verify user has access to project (using UUID)
     let access = await query<ProjectUserRow>(
       "SELECT role FROM project_users WHERE project_id = ? AND user_id = ?",
-      [projectUuid, decoded.userId]
+      [projectUuid, session.user.id]
     );
 
     // Auto-assign user to project as a member if they don't have access
@@ -54,10 +49,10 @@ export async function GET(request: NextRequest) {
       const assignId = randomUUID();
       await query(
         "INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)",
-        [assignId, projectUuid, decoded.userId, "member"]
+        [assignId, projectUuid, session.user.id, "member"]
       );
       console.log(
-        `Auto-assigned user ${decoded.userId} to project ${projectUuid} as member`
+        `Auto-assigned user ${session.user.id} to project ${projectUuid} as member`
       );
     }
 
@@ -85,19 +80,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Try to get token, but don't require it for uploads
-    const token = request.cookies.get("auth_token")?.value;
-    let decoded: { userId: string; username: string; projectId?: string } | null = null;
+    // Try to get session, but don't require it for uploads
+    const session = await auth();
     
-    if (token) {
-      decoded = verifyToken(token);
-      console.log("📥 POST /api/documents - Token found:", {
-        hasToken: !!token,
-        decoded: !!decoded,
-        userId: decoded?.userId,
+    if (session) {
+      console.log("📥 POST /api/documents - Session found:", {
+        hasSession: !!session,
+        userId: session.user?.id,
       });
     } else {
-      console.log("📥 POST /api/documents - No token, allowing upload without auth");
+      console.log("📥 POST /api/documents - No session, allowing upload without auth");
     }
 
     const body = await request.json();
@@ -132,18 +124,18 @@ export async function POST(request: NextRequest) {
       await query(
         `INSERT INTO projects (id, project_id, name, created_by, calibration_factor)
          VALUES (?, ?, ?, ?, 1.0)`,
-        [projectUuid, projectId, projectId, decoded?.userId || null]
+        [projectUuid, projectId, projectId, session?.user?.id || null]
       );
 
       // Assign user as owner if authenticated, otherwise skip
-      if (decoded?.userId) {
+      if (session?.user?.id) {
         const assignId = randomUUID();
         await query(
           "INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)",
-          [assignId, projectUuid, decoded.userId, "owner"]
+          [assignId, projectUuid, session.user.id, "owner"]
         );
         console.log(
-          `Created new project ${projectId} (${projectUuid}) and assigned user ${decoded.userId} as owner`
+          `Created new project ${projectId} (${projectUuid}) and assigned user ${session.user.id} as owner`
         );
       } else {
         console.log(
@@ -155,10 +147,10 @@ export async function POST(request: NextRequest) {
       projectUuid = project.id; // Use the UUID for project_users lookup
 
       // Auto-assign user to project if authenticated
-      if (decoded?.userId) {
+      if (session?.user?.id) {
         const access = await query<ProjectUserRow>(
           "SELECT role FROM project_users WHERE project_id = ? AND user_id = ?",
-          [projectUuid, decoded.userId]
+          [projectUuid, session.user.id]
         );
 
         if (access.length === 0) {
@@ -166,10 +158,10 @@ export async function POST(request: NextRequest) {
           const assignId = randomUUID();
           await query(
             "INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)",
-            [assignId, projectUuid, decoded.userId, "member"]
+            [assignId, projectUuid, session.user.id, "member"]
           );
           console.log(
-            `Auto-assigned user ${decoded.userId} to project ${projectUuid} as member`
+            `Auto-assigned user ${session.user.id} to project ${projectUuid} as member`
           );
         }
       }
@@ -188,7 +180,7 @@ export async function POST(request: NextRequest) {
         fileData || null,
         fileSize,
         pageCount || 0,
-        decoded?.userId || null,
+        session?.user?.id || null,
       ]
     );
 

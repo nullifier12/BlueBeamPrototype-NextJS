@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { signIn } from "next-auth/react";
 import { LogIn, Loader2, UserPlus } from "lucide-react";
 import { User } from "@/types";
 
@@ -65,41 +66,51 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           projectId: projectId?.trim() || "NOT PROVIDED",
         });
 
-        const response = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(loginPayload),
+        // Use NextAuth signIn
+        const result = await signIn("credentials", {
+          username,
+          password,
+          projectId: projectId?.trim() || undefined,
+          redirect: false,
         });
 
-        const data = await response.json();
-
-        if (!response.ok) {
-          // console.error("❌ Login failed:", data.error);
-          setError(data.error || "Login failed");
+        if (result?.error) {
+          setError(result.error || "Login failed");
           setLoading(false);
           return;
         }
 
-        console.log("🔐 Login response:", {
-          user: data.user,
-          projectId: data.projectId,
-          hasProjectId: !!data.projectId,
-        });
-
-        if (!data.projectId && projectId?.trim()) {
-          console.warn(
-            "⚠️ Project ID was provided but not returned. User may not have access to this project."
-          );
-          setError(
-            "You don't have access to this project. Please check the Project ID or contact your administrator."
-          );
+        if (!result?.ok) {
+          setError("Login failed. Please check your credentials.");
           setLoading(false);
           return;
         }
 
-        onLoginSuccess(data.user, data.projectId || undefined);
+        // Get session to get user data
+        const sessionResponse = await fetch("/api/auth/session");
+        const session = await sessionResponse.json();
+
+        if (!session?.user) {
+          setError("Failed to get user session");
+          setLoading(false);
+          return;
+        }
+
+        console.log("🔐 Login successful:", {
+          user: session.user,
+          projectId: session.projectId,
+        });
+
+        // Map NextAuth session to our User type
+        const user: User = {
+          id: session.user.id,
+          username: session.user.username,
+          name: session.user.name || "",
+          email: session.user.email || "",
+          color: session.user.color,
+        };
+
+        onLoginSuccess(user, session.projectId || undefined);
       }
     } catch (err) {
       const errorMessage =

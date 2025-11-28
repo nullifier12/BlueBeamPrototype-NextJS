@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '../auth/[...nextauth]/route';
 import { query } from '@/lib/db';
-import { verifyToken } from '@/lib/auth';
 import { randomUUID } from 'crypto';
 import { PunchListItem, PunchListItemRow, ProjectUserRow, ProjectRow } from '@/types';
 
@@ -19,21 +19,15 @@ export async function GET(request: NextRequest) {
   try {
     console.log("📥 GET punch-items request received");
     
-    const token = request.cookies.get('auth_token')?.value;
-    if (!token) {
-      console.error("❌ No auth token");
+    const session = await auth();
+    if (!session || !session.user) {
+      console.error("❌ No session");
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      console.error("❌ Invalid token");
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('projectId');
-    console.log("🔍 Request params:", { projectId, userId: decoded.userId });
+    console.log("🔍 Request params:", { projectId, userId: session.user.id });
 
     if (!projectId) {
       console.error("❌ No projectId in request");
@@ -56,7 +50,7 @@ export async function GET(request: NextRequest) {
     console.log("🔐 Verifying project access...");
     let access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [projectUuid, decoded.userId]
+      [projectUuid, session.user.id]
     );
 
     console.log("🔐 Access check result:", { hasAccess: access.length > 0, role: access[0]?.role });
@@ -66,13 +60,13 @@ export async function GET(request: NextRequest) {
       const assignId = randomUUID();
       await query(
         'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
-        [assignId, projectUuid, decoded.userId, 'member']
+        [assignId, projectUuid, session.user.id, 'member']
       );
-      console.log(`Auto-assigned user ${decoded.userId} to project ${projectUuid} as member`);
+      console.log(`Auto-assigned user ${session.user.id} to project ${projectUuid} as member`);
       // Re-fetch access
       access = await query<ProjectUserRow>(
         'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-        [projectUuid, decoded.userId]
+        [projectUuid, session.user.id]
       );
     }
 
@@ -215,7 +209,7 @@ export async function POST(request: NextRequest) {
     // Verify user has access to project
     let access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [projectUuid, decoded.userId]
+      [projectUuid, session.user.id]
     );
 
     // Auto-assign user to project as a member if they don't have access
@@ -223,9 +217,9 @@ export async function POST(request: NextRequest) {
       const assignId = randomUUID();
       await query(
         'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
-        [assignId, projectUuid, decoded.userId, 'member']
+        [assignId, projectUuid, session.user.id, 'member']
       );
-      console.log(`Auto-assigned user ${decoded.userId} to project ${projectUuid} as member`);
+      console.log(`Auto-assigned user ${session.user.id} to project ${projectUuid} as member`);
     }
 
     const id = randomUUID();
@@ -233,7 +227,7 @@ export async function POST(request: NextRequest) {
       id,
       projectId,
       description: description.substring(0, 50),
-      userId: decoded.userId,
+      userId: session.user.id,
     });
 
     try {
@@ -262,7 +256,7 @@ export async function POST(request: NextRequest) {
           assignedTo || null,
           attachments ? JSON.stringify(attachments) : null,
           comments || null,
-          decoded.userId,
+          session.user.id,
         ]
       );
       console.log("✅ Punch item inserted successfully");

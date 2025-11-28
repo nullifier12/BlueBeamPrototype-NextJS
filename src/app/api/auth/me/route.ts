@@ -1,45 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
-import { query } from "@/lib/db";
-import { UserRow } from "@/types";
+import { auth } from "../[...nextauth]/route";
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get("auth_token")?.value;
+    const session = await auth();
 
-    if (!token) {
-      return NextResponse.json({ error: "No token provided" }, { status: 401 });
+    if (!session || !session.user) {
+      return NextResponse.json({ error: "No session" }, { status: 401 });
     }
-
-    const decoded = verifyToken(token);
-
-    if (!decoded) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-    }
-
-    // Get user details from database
-    const users = await query<UserRow & { username: string }>(
-      "SELECT id, username, name, email, avatar, color FROM users WHERE id = ?",
-      [decoded.userId]
-    );
-
-    if (users.length === 0) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    const user = users[0];
 
     return NextResponse.json({
       success: true,
       user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar || undefined,
-        color: user.color,
+        id: session.user.id,
+        username: session.user.username,
+        name: session.user.name,
+        email: session.user.email,
+        avatar: session.user.image || undefined,
+        color: session.user.color,
       },
-      projectId: decoded.projectId,
+      projectId: session.projectId,
     });
   } catch (error) {
     console.error("Session verification error:", error);
