@@ -47,6 +47,31 @@ export default function BlueBeamApp() {
     scrollY: 0,
   });
 
+  // Check for existing session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const session = await api.getCurrentSession();
+        if (session.success && session.user) {
+          console.log("✅ Session restored:", {
+            user: session.user.name,
+            projectId: session.projectId || "NOT PROVIDED"
+          });
+          setCurrentUser(session.user);
+          if (session.projectId) {
+            setCurrentProjectId(session.projectId);
+          }
+          setIsAuthenticated(true);
+        }
+      } catch (error) {
+        console.log("ℹ️ No existing session found");
+        // Session doesn't exist or is invalid, user needs to login
+      }
+    };
+
+    checkSession();
+  }, []);
+
   // Load project data when authenticated
   useEffect(() => {
     console.log("🔄 useEffect check:", { 
@@ -946,6 +971,35 @@ export default function BlueBeamApp() {
     input.click();
   }, []);
 
+  const handleLogout = useCallback(async () => {
+    try {
+      await api.logout();
+      console.log("✅ Logout successful");
+      
+      // Clear all state
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      setCurrentProjectId(undefined);
+      setDocuments([]);
+      setSelectedDocument(null);
+      setAnnotations([]);
+      setPunchItems([]);
+      setProjectId("");
+      setProjectName("");
+      setProjectLocation("");
+      setProjectTargetCompletion("");
+      setCompanyName("");
+      setCalibrationFactor(1.0);
+      setProjectNotes("");
+    } catch (error) {
+      console.error("❌ Logout error:", error);
+      // Still clear state even if API call fails
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      setCurrentProjectId(undefined);
+    }
+  }, []);
+
   if (!isAuthenticated) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
@@ -975,6 +1029,7 @@ export default function BlueBeamApp() {
         onUpload={handleUploadDocument}
         onExport={handleExport}
         onImport={handleImport}
+        onLogout={handleLogout}
         zoom={viewport.zoom}
       />
 

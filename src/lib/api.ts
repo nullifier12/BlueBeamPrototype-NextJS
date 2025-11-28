@@ -31,6 +31,23 @@ export async function login(username: string, password: string, projectId?: stri
   });
 }
 
+export async function getCurrentSession() {
+  return apiRequest<{ success: boolean; user: User; projectId?: string }>('/auth/me');
+}
+
+export async function logout() {
+  return apiRequest<{ success: boolean }>('/auth/logout', {
+    method: 'POST',
+  });
+}
+
+export async function register(username: string, password: string, email: string, name: string) {
+  return apiRequest<{ success: boolean; user: User }>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, email, name }),
+  });
+}
+
 // Projects
 export async function getProject(projectId: string) {
   return apiRequest<{ project: Project }>(`/projects/${projectId}`);
