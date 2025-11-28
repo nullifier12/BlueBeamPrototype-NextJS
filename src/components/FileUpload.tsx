@@ -18,108 +18,121 @@ export default function FileUpload({
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  const handleFile = useCallback(async (file: File) => {
-    console.log("📁 File selected:", {
-      name: file.name,
-      type: file.type,
-      size: file.size,
-    });
-
-    if (!file.type.includes("pdf")) {
-      console.warn("⚠️ Invalid file type:", file.type);
-      alert("Please upload a PDF file");
-      return;
-    }
-
-    setUploading(true);
-    console.log("⏳ Starting file conversion to base64 and page count detection...");
-
-    try {
-      // Convert file to base64 for storage
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          // Remove data:application/pdf;base64, prefix
-          const base64Data = result.split(',')[1] || result;
-          console.log("✅ Base64 conversion complete, length:", base64Data.length);
-          resolve(base64Data);
-        };
-        reader.onerror = (error) => {
-          console.error("❌ FileReader error:", error);
-          reject(error);
-        };
-        reader.readAsDataURL(file);
+  const handleFile = useCallback(
+    async (file: File) => {
+      console.log("📁 File selected:", {
+        name: file.name,
+        type: file.type,
+        size: file.size,
       });
 
-      // Detect page count using PDF.js
-      let pageCount = 1; // Default to 1 if detection fails
-      try {
-        if (typeof window !== 'undefined' && window.pdfjsLib) {
-          console.log("📄 Detecting PDF page count...");
-          const arrayBuffer = await file.arrayBuffer();
-          const pdfData = new Uint8Array(arrayBuffer);
-          
-          const loadingTask = window.pdfjsLib.getDocument(pdfData, {
-            cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
-            cMapPacked: true,
-          });
-          
-          const pdf = await loadingTask.promise;
-          pageCount = pdf.numPages;
-          console.log(`✅ PDF has ${pageCount} page(s)`);
-        } else {
-          console.warn("⚠️ PDF.js not available, using default page count of 1");
-        }
-      } catch (pageCountError) {
-        console.error("❌ Error detecting page count:", pageCountError);
-        console.warn("⚠️ Using default page count of 1");
+      if (!file.type.includes("pdf")) {
+        console.warn("⚠️ Invalid file type:", file.type);
+        alert("Please upload a PDF file");
+        return;
       }
 
-      // Create object URL for immediate display
-      const fileUrl = URL.createObjectURL(file);
-      console.log("🔗 Created blob URL:", fileUrl.substring(0, 50) + "...");
+      setUploading(true);
+      console.log(
+        "⏳ Starting file conversion to base64 and page count detection..."
+      );
 
-      // Create PDF document object with base64 data
-      // Generate ID using uuid package (works in all browsers)
-      const documentId = uuidv4();
-      
-      const now = new Date();
-      const newDocument: PDFDocument = {
-        id: documentId,
-        name: file.name,
-        url: fileUrl,
-        pageCount: pageCount, // Use detected page count
-        createdAt: now,
-        updatedAt: now,
-        size: file.size,
-        status: "active",
-        // Store base64 for database
-        base64: base64,
-      } as PDFDocument & { base64?: string };
+      try {
+        // Convert file to base64 for storage
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            // Remove data:application/pdf;base64, prefix
+            const base64Data = result.split(",")[1] || result;
+            console.log(
+              "✅ Base64 conversion complete, length:",
+              base64Data.length
+            );
+            resolve(base64Data);
+          };
+          reader.onerror = (error) => {
+            console.error("❌ FileReader error:", error);
+            reject(error);
+          };
+          reader.readAsDataURL(file);
+        });
 
-      console.log("📤 Calling onDocumentUpload with document:", {
-        name: newDocument.name,
-        hasBase64: !!base64,
-        pageCount: newDocument.pageCount,
-        url: newDocument.url.substring(0, 50) + "...",
-      });
+        // Detect page count using PDF.js
+        let pageCount = 1; // Default to 1 if detection fails
+        try {
+          if (typeof window !== "undefined" && window.pdfjsLib) {
+            console.log("📄 Detecting PDF page count...");
+            const arrayBuffer = await file.arrayBuffer();
+            const pdfData = new Uint8Array(arrayBuffer);
 
-      // Call onDocumentUpload first, let it handle closing the modal
-      onDocumentUpload(newDocument);
-      // Don't close here - let the parent handle it after successful upload
-    } catch (error) {
-      console.error("❌ Error uploading file:", error);
-      console.error("Error details:", {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-      alert("Error uploading file. Please try again. Check console for details.");
-    } finally {
-      setUploading(false);
-      console.log("🏁 File upload process finished");
-    }
-  }, [onDocumentUpload, onClose]);
+            const loadingTask = window.pdfjsLib.getDocument(pdfData, {
+              cMapUrl:
+                "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
+              cMapPacked: true,
+            });
+
+            const pdf = await loadingTask.promise;
+            pageCount = pdf.numPages;
+            console.log(`✅ PDF has ${pageCount} page(s)`);
+          } else {
+            console.warn(
+              "⚠️ PDF.js not available, using default page count of 1"
+            );
+          }
+        } catch (pageCountError) {
+          console.error("❌ Error detecting page count:", pageCountError);
+          console.warn("⚠️ Using default page count of 1");
+        }
+
+        // Create object URL for immediate display
+        const fileUrl = URL.createObjectURL(file);
+        console.log("🔗 Created blob URL:", fileUrl.substring(0, 50) + "...");
+
+        // Create PDF document object with base64 data
+        // Generate ID using uuid package (works in all browsers)
+        const documentId = uuidv4();
+        console.log("UUID", documentId);
+        const now = new Date();
+        const newDocument: PDFDocument = {
+          id: documentId,
+          name: file.name,
+          url: fileUrl,
+          pageCount: pageCount, // Use detected page count
+          createdAt: now,
+          updatedAt: now,
+          size: file.size,
+          status: "active",
+          // Store base64 for database
+          base64: base64,
+        } as PDFDocument & { base64?: string };
+
+        console.log("📤 Calling onDocumentUpload with document:", {
+          name: newDocument.name,
+          hasBase64: !!base64,
+          pageCount: newDocument.pageCount,
+          url: newDocument.url.substring(0, 50) + "...",
+        });
+
+        // Call onDocumentUpload first, let it handle closing the modal
+        onDocumentUpload(newDocument);
+        // Don't close here - let the parent handle it after successful upload
+      } catch (error) {
+        console.error("❌ Error uploading file:", error);
+        console.error("Error details:", {
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+        alert(
+          "Error uploading file. Please try again. Check console for details."
+        );
+      } finally {
+        setUploading(false);
+        console.log("🏁 File upload process finished");
+      }
+    },
+    [onDocumentUpload, onClose]
+  );
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -131,23 +144,28 @@ export default function FileUpload({
     }
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFile(e.dataTransfer.files[0]);
-    }
-  }, [handleFile]);
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFile(e.dataTransfer.files[0]);
+      }
+    },
+    [handleFile]
+  );
 
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    if (e.target.files && e.target.files[0]) {
-      handleFile(e.target.files[0]);
-    }
-  }, [handleFile]);
-
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      e.preventDefault();
+      if (e.target.files && e.target.files[0]) {
+        handleFile(e.target.files[0]);
+      }
+    },
+    [handleFile]
+  );
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
