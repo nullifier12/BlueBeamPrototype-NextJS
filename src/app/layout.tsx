@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BlueBeam Prototype",
+  title: "Web-Based PDF Markup Inspection Tool",
   description: "A Bluebeam-like PDF annotation and collaboration tool",
 };
 

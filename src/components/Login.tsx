@@ -116,9 +116,9 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         <div className="flex items-center justify-center mb-6">
           <LogIn className="w-12 h-12 text-primary" />
         </div>
-        <h1 className="text-2xl font-bold text-center mb-6">
-          BlueBeam Prototype
-        </h1>
+        <h6 className="font-bold text-center mb-6 whitespace-nowrap">
+          Web-Based PDF Markup Inspection Tool
+        </h6>
         <h2 className="text-xl font-semibold text-center mb-6">
           {isRegistering ? "Create Account" : "Login"}
         </h2>
