@@ -15,14 +15,14 @@ export async function apiRequest<T>(
     credentials: "include",
   });
 
+  // Read response body only once
+  const data = await response.json().catch(() => ({ error: "Unknown error" }));
+
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ error: "Unknown error" }));
-    // throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    throw new Error((data as any).error || `HTTP error! status: ${response.status}`);
   }
 
-  return response.json();
+  return data as T;
 }
 
 // Auth
