@@ -4,6 +4,7 @@ import React, { useCallback, useState } from "react";
 import { Upload, X } from "lucide-react";
 import { PDFDocument } from "@/types";
 import { cn } from "@/utils/cn";
+import { v4 as uuidv4 } from "uuid";
 
 interface FileUploadProps {
   onDocumentUpload: (document: PDFDocument) => void;
@@ -80,10 +81,8 @@ export default function FileUpload({
       console.log("🔗 Created blob URL:", fileUrl.substring(0, 50) + "...");
 
       // Create PDF document object with base64 data
-      // Use crypto.randomUUID() for consistent ID generation (client-side only)
-      const documentId = typeof window !== 'undefined' 
-        ? crypto.randomUUID() 
-        : `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      // Generate ID using uuid package (works in all browsers)
+      const documentId = uuidv4();
       
       const now = new Date();
       const newDocument: PDFDocument = {
