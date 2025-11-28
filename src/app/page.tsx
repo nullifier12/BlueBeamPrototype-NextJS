@@ -160,17 +160,33 @@ export default function BlueBeamApp() {
           console.error("No valid URL for document:", doc.name);
         }
 
+        // Parse dates consistently - use existing dates or create from strings
+        let createdAt: Date;
+        let updatedAt: Date;
+        
+        if (doc.createdAt instanceof Date) {
+          createdAt = doc.createdAt;
+        } else if (doc.created_at) {
+          createdAt = new Date(doc.created_at);
+        } else {
+          createdAt = new Date(); // Fallback only if no date exists
+        }
+        
+        if (doc.updatedAt instanceof Date) {
+          updatedAt = doc.updatedAt;
+        } else if (doc.updated_at) {
+          updatedAt = new Date(doc.updated_at);
+        } else {
+          updatedAt = createdAt; // Use createdAt as fallback
+        }
+        
         return {
           id: doc.id,
           name: doc.name,
           url: url || "",
           pageCount: doc.page_count || 0,
-          createdAt:
-            doc.createdAt ||
-            (doc.created_at ? new Date(doc.created_at) : new Date()),
-          updatedAt:
-            doc.updatedAt ||
-            (doc.updated_at ? new Date(doc.updated_at) : new Date()),
+          createdAt,
+          updatedAt,
           size: doc.file_size || 0,
           status: doc.status || "active",
         };
@@ -888,21 +904,33 @@ export default function BlueBeamApp() {
           docUrl ? docUrl.substring(0, 50) + "..." : "MISSING!"
         );
 
+        // Parse dates consistently from database
+        let docCreatedAt: Date;
+        let docUpdatedAt: Date;
+        
+        if (result.document.createdAt instanceof Date) {
+          docCreatedAt = result.document.createdAt;
+        } else if (result.document.created_at) {
+          docCreatedAt = new Date(result.document.created_at);
+        } else {
+          docCreatedAt = new Date(); // Only use new Date() if no date exists
+        }
+        
+        if (result.document.updatedAt instanceof Date) {
+          docUpdatedAt = result.document.updatedAt;
+        } else if (result.document.updated_at) {
+          docUpdatedAt = new Date(result.document.updated_at);
+        } else {
+          docUpdatedAt = docCreatedAt; // Use createdAt as fallback
+        }
+        
         const doc: PDFDocument = {
           id: result.document.id,
           name: result.document.name || newDocument.name,
           url: docUrl || newDocument.url || "",
           pageCount: result.document.page_count || newDocument.pageCount || 0,
-          createdAt:
-            result.document.createdAt ||
-            (result.document.created_at
-              ? new Date(result.document.created_at)
-              : new Date()),
-          updatedAt:
-            result.document.updatedAt ||
-            (result.document.updated_at
-              ? new Date(result.document.updated_at)
-              : new Date()),
+          createdAt: docCreatedAt,
+          updatedAt: docUpdatedAt,
           size: result.document.file_size || newDocument.size || 0,
           status: result.document.status || "active",
         };
@@ -1060,7 +1088,11 @@ export default function BlueBeamApp() {
   }, []);
 
   if (!isAuthenticated) {
-    return <Login onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <div suppressHydrationWarning>
+        <Login onLoginSuccess={handleLoginSuccess} />
+      </div>
+    );
   }
 
   if (loading) {
@@ -1075,7 +1107,7 @@ export default function BlueBeamApp() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-background" suppressHydrationWarning>
       <Toolbar
         activeTool={activeTool}
         onToolSelect={handleToolSelect}

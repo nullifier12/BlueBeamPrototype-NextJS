@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
+import { randomUUID } from 'crypto';
 import { ProjectRow, ProjectUserRow } from '@/types';
 
 export async function GET(
@@ -34,13 +35,25 @@ export async function GET(
     const project = projects[0];
 
     // Verify user has access
-    const access = await query<ProjectUserRow>(
+    let access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [project.id, decoded.userId]
     );
 
+    // Auto-assign user to project as a member if they don't have access
+    // This allows authenticated users to access any project
     if (access.length === 0) {
-      return NextResponse.json({ error: 'No access to project' }, { status: 403 });
+      const assignId = randomUUID();
+      await query(
+        'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
+        [assignId, project.id, decoded.userId, 'member']
+      );
+      console.log(`Auto-assigned user ${decoded.userId} to project ${project.id} as member`);
+      // Re-fetch access to include the new assignment
+      access = await query<ProjectUserRow>(
+        'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
+        [project.id, decoded.userId]
+      );
     }
 
     return NextResponse.json({ project });
@@ -72,13 +85,41 @@ export async function PUT(
     const { projectId } = await params;
     const body = await request.json();
 
-    // Verify user has access
-    const access = await query<ProjectUserRow>(
-      'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [projectId, decoded.userId]
+    // Find project by ID or project_id
+    const projects = await query<ProjectRow>(
+      'SELECT id FROM projects WHERE id = ? OR project_id = ?',
+      [projectId, projectId]
     );
 
-    if (access.length === 0 || (access[0].role !== 'owner' && access[0].role !== 'admin')) {
+    if (projects.length === 0) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const project = projects[0];
+
+    // Verify user has access
+    let access = await query<ProjectUserRow>(
+      'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
+      [project.id, decoded.userId]
+    );
+
+    // Auto-assign user to project if they don't have access
+    if (access.length === 0) {
+      const assignId = randomUUID();
+      await query(
+        'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
+        [assignId, project.id, decoded.userId, 'member']
+      );
+      console.log(`Auto-assigned user ${decoded.userId} to project ${project.id} as member`);
+      // Re-fetch access
+      access = await query<ProjectUserRow>(
+        'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
+        [project.id, decoded.userId]
+      );
+    }
+
+    // Only owners and admins can update projects
+    if (access[0].role !== 'owner' && access[0].role !== 'admin') {
       return NextResponse.json({ error: 'No permission to update project' }, { status: 403 });
     }
 
@@ -121,7 +162,7 @@ export async function PUT(
     }
     
     // Add WHERE clause parameters
-    updateValues.push(projectId, projectId);
+    updateValues.push(project.id, project.id);
     
     await query(
       `UPDATE projects SET ${updateFields.join(', ')}

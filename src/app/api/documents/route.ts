@@ -41,13 +41,19 @@ export async function GET(request: NextRequest) {
     const projectUuid = project.id; // Use the UUID for project_users lookup
 
     // Verify user has access to project (using UUID)
-    const access = await query<ProjectUserRow>(
+    let access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
       [projectUuid, decoded.userId]
     );
 
+    // Auto-assign user to project as a member if they don't have access
     if (access.length === 0) {
-      return NextResponse.json({ error: 'No access to project' }, { status: 403 });
+      const assignId = randomUUID();
+      await query(
+        'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
+        [assignId, projectUuid, decoded.userId, 'member']
+      );
+      console.log(`Auto-assigned user ${decoded.userId} to project ${projectUuid} as member`);
     }
 
     const documents = await query<DocumentRow>(

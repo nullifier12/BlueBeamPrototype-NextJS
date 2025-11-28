@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth';
 import { randomUUID } from 'crypto';
-import { PunchListItem, PunchListItemRow, ProjectUserRow } from '@/types';
+import { PunchListItem, PunchListItemRow, ProjectUserRow, ProjectRow } from '@/types';
 
 // Helper function to safely parse float from number or string
 function safeParseFloat(value: number | string | null | undefined): number {
@@ -40,18 +40,40 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'projectId is required' }, { status: 400 });
     }
 
+    // Find project by ID or project_id to get the UUID
+    const projects = await query<ProjectRow>(
+      'SELECT id FROM projects WHERE id = ? OR project_id = ?',
+      [projectId, projectId]
+    );
+
+    if (projects.length === 0) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const projectUuid = projects[0].id;
+
     // Verify user has access to project
     console.log("🔐 Verifying project access...");
-    const access = await query<ProjectUserRow>(
+    let access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [projectId, decoded.userId]
+      [projectUuid, decoded.userId]
     );
 
     console.log("🔐 Access check result:", { hasAccess: access.length > 0, role: access[0]?.role });
 
+    // Auto-assign user to project as a member if they don't have access
     if (access.length === 0) {
-      console.error("❌ No access to project");
-      return NextResponse.json({ error: 'No access to project' }, { status: 403 });
+      const assignId = randomUUID();
+      await query(
+        'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
+        [assignId, projectUuid, decoded.userId, 'member']
+      );
+      console.log(`Auto-assigned user ${decoded.userId} to project ${projectUuid} as member`);
+      // Re-fetch access
+      access = await query<ProjectUserRow>(
+        'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
+        [projectUuid, decoded.userId]
+      );
     }
 
     console.log("📋 Fetching punch items from database...");
@@ -178,14 +200,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify user has access to project
-    const access = await query<ProjectUserRow>(
-      'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [projectId, decoded.userId]
+    // Find project by ID or project_id to get the UUID
+    const projects = await query<ProjectRow>(
+      'SELECT id FROM projects WHERE id = ? OR project_id = ?',
+      [projectId, projectId]
     );
 
+    if (projects.length === 0) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const projectUuid = projects[0].id;
+
+    // Verify user has access to project
+    let access = await query<ProjectUserRow>(
+      'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
+      [projectUuid, decoded.userId]
+    );
+
+    // Auto-assign user to project as a member if they don't have access
     if (access.length === 0) {
-      return NextResponse.json({ error: 'No access to project' }, { status: 403 });
+      const assignId = randomUUID();
+      await query(
+        'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
+        [assignId, projectUuid, decoded.userId, 'member']
+      );
+      console.log(`Auto-assigned user ${decoded.userId} to project ${projectUuid} as member`);
     }
 
     const id = randomUUID();
@@ -206,7 +246,7 @@ export async function POST(request: NextRequest) {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
-          projectId,
+          projectUuid,
           annotationId || null,
           documentId || null,
           description,
