@@ -1540,6 +1540,26 @@ export default function PDFViewer({
       const startX = dragStart.x;
       const startY = dragStart.y;
 
+      // If movement is too small, treat this as a click and DO NOT create an annotation
+      const minMove = 5; // pixels
+      const deltaX = Math.abs(p.x - startX);
+      const deltaY = Math.abs(p.y - startY);
+      if (deltaX < minMove && deltaY < minMove) {
+        console.log("Mouse movement too small, skipping annotation creation");
+        if (currentElement && svgOverlayRef.current) {
+          svgOverlayRef.current.removeChild(currentElement);
+          (
+            svgOverlayRef.current as SVGSVGElement & {
+              currentDrawingElement?: SVGElement;
+            }
+          ).currentDrawingElement = undefined;
+        }
+        setIsCreating(false);
+        setDragStart(null);
+        setIsPointerDown(false);
+        return;
+      }
+
       let newAnnotation: Omit<
         Annotation,
         "id" | "createdAt" | "updatedAt"

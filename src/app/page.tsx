@@ -482,9 +482,22 @@ export default function BlueBeamApp() {
 
         setAnnotations((prev) => [...prev, newAnnotation]);
 
-        // Create punch item
-        const punchItem: Omit<PunchListItem, "id" | "createdAt" | "updatedAt"> =
-          {
+        // Only create punch list items for shape/measurement annotations,
+        // not for every annotation type (e.g. text, highlight, etc.)
+        const autoPunchTypes: AnnotationType[] = [
+          "rectangle",
+          "circle",
+          "ellipse",
+          "polyline",
+          "arc",
+          "measurement",
+        ];
+
+        if (autoPunchTypes.includes(annotation.type)) {
+          const punchItem: Omit<
+            PunchListItem,
+            "id" | "createdAt" | "updatedAt"
+          > = {
             annotationId: newAnnotation.id,
             description: `Issue with ${annotation.type}`,
             demarcation: getDemarcationText(newAnnotation),
@@ -498,7 +511,9 @@ export default function BlueBeamApp() {
             attachments: [],
             comments: "",
           };
-        await handlePunchItemCreate(punchItem);
+
+          await handlePunchItemCreate(punchItem);
+        }
 
         // Capture demarcation image
         setTimeout(async () => {
