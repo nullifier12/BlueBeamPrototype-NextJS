@@ -168,7 +168,7 @@ export default function BlueBeamApp() {
         // Parse dates consistently - use existing dates or create from strings
         let createdAt: Date;
         let updatedAt: Date;
-        
+
         if (doc.createdAt instanceof Date) {
           createdAt = doc.createdAt;
         } else if (doc.created_at) {
@@ -176,7 +176,7 @@ export default function BlueBeamApp() {
         } else {
           createdAt = new Date(); // Fallback only if no date exists
         }
-        
+
         if (doc.updatedAt instanceof Date) {
           updatedAt = doc.updatedAt;
         } else if (doc.updated_at) {
@@ -184,7 +184,7 @@ export default function BlueBeamApp() {
         } else {
           updatedAt = createdAt; // Use createdAt as fallback
         }
-        
+
         return {
           id: doc.id,
           name: doc.name,
@@ -914,7 +914,7 @@ export default function BlueBeamApp() {
         // Parse dates consistently from database
         let docCreatedAt: Date;
         let docUpdatedAt: Date;
-        
+
         if (result.document.createdAt instanceof Date) {
           docCreatedAt = result.document.createdAt;
         } else if (result.document.created_at) {
@@ -922,7 +922,7 @@ export default function BlueBeamApp() {
         } else {
           docCreatedAt = new Date(); // Only use new Date() if no date exists
         }
-        
+
         if (result.document.updatedAt instanceof Date) {
           docUpdatedAt = result.document.updatedAt;
         } else if (result.document.updated_at) {
@@ -930,7 +930,7 @@ export default function BlueBeamApp() {
         } else {
           docUpdatedAt = docCreatedAt; // Use createdAt as fallback
         }
-        
+
         const doc: PDFDocument = {
           id: result.document.id,
           name: result.document.name || newDocument.name,
@@ -1119,7 +1119,10 @@ export default function BlueBeamApp() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background" suppressHydrationWarning>
+    <div
+      className="h-screen flex flex-col bg-background"
+      suppressHydrationWarning
+    >
       <Toolbar
         activeTool={activeTool}
         onToolSelect={handleToolSelect}

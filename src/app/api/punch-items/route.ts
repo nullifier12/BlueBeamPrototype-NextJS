@@ -150,15 +150,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.cookies.get('auth_token')?.value;
-    if (!token) {
+    const session = await auth();
+    if (!session || !session.user) {
+      console.error("❌ No session in punch-items POST:", { hasSession: !!session });
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    
+    console.log("✅ Session found in punch-items POST:", { userId: session.user.id });
 
     const body = await request.json();
     console.log("📥 Creating punch item, received data:", {

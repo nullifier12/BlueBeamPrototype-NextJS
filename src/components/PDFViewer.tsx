@@ -46,6 +46,10 @@ export default function PDFViewer({
   const [isDrawingArc, setIsDrawingArc] = useState(false);
   const [arcPhase, setArcPhase] = useState<'start' | 'center' | 'end'>('start');
   const [isPointerDown, setIsPointerDown] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [pdfDoc, setPdfDoc] = useState<
     typeof window.pdfjsLib.PDFDocumentProxy | null
   >(null);
@@ -58,6 +62,7 @@ export default function PDFViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgOverlayRef = useRef<SVGSVGElement>(null);
+  const pdfContainerRef = useRef<HTMLDivElement>(null);
 
   // Helper to zoom in centered on a clicked area
   const handleDoubleClick = useCallback(
@@ -1048,6 +1053,24 @@ export default function PDFViewer({
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent, pageNumber: number) => {
+      // Check for panning: spacebar + mouse or middle mouse button
+      const isMiddleMouse = e.button === 1;
+      const shouldPan = isSpacePressed || isMiddleMouse;
+      
+      if (shouldPan) {
+        e.preventDefault();
+        setIsPanning(true);
+        const container = containerRef.current;
+        if (container) {
+          const rect = container.getBoundingClientRect();
+          setPanStart({
+            x: e.clientX - rect.left + container.scrollLeft,
+            y: e.clientY - rect.top + container.scrollTop
+          });
+        }
+        return;
+      }
+
       console.log("Mouse down event triggered, activeTool:", activeTool);
 
       if (!activeTool || !containerRef.current || !svgOverlayRef.current) {
@@ -1306,6 +1329,28 @@ export default function PDFViewer({
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
+      // Handle panning
+      if (isPanning && panStart && containerRef.current) {
+        const container = containerRef.current;
+        const rect = container.getBoundingClientRect();
+        const currentX = e.clientX - rect.left + container.scrollLeft;
+        const currentY = e.clientY - rect.top + container.scrollTop;
+        
+        const deltaX = currentX - panStart.x;
+        const deltaY = currentY - panStart.y;
+        
+        setPanOffset(prev => ({
+          x: prev.x + deltaX,
+          y: prev.y + deltaY
+        }));
+        
+        setPanStart({
+          x: currentX,
+          y: currentY
+        });
+        return;
+      }
+
       // Handle arc preview drawing (from my-app implementation)
       if (isDrawingArc && arcPhase === 'end' && arcCenter && arcStartPoint && svgOverlayRef.current) {
         const currentP = getCurrentZoomPointerPos(e);
@@ -1435,12 +1480,21 @@ export default function PDFViewer({
       arcCenter,
       arcStartPoint,
       calculateDistance,
+      isPanning,
+      panStart,
     ]
   );
 
   const handleMouseUp = useCallback(
     (e: React.MouseEvent, pageNumber: number) => {
       console.log("Mouse up event triggered");
+
+      // Handle panning end
+      if (isPanning) {
+        setIsPanning(false);
+        setPanStart(null);
+        return;
+      }
 
       // Allow arc tool to proceed even without isCreating/dragStart
       if (activeTool === "arc" && isDrawingArc) {
@@ -1677,6 +1731,49 @@ export default function PDFViewer({
     onViewportChange({ ...viewport, rotation: (viewport.rotation + 90) % 360 });
   }, [viewport, onViewportChange]);
 
+  // Keyboard event listeners for spacebar panning
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !isPanning) {
+        e.preventDefault();
+        setIsSpacePressed(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setIsSpacePressed(false);
+        if (isPanning) {
+          setIsPanning(false);
+          setPanStart(null);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isPanning]);
+
+  // Apply pan transform to container
+  useEffect(() => {
+    const container = pdfContainerRef.current;
+    if (container) {
+      container.style.transform = `translate(${panOffset.x}px, ${panOffset.y}px)`;
+      container.style.transformOrigin = '0 0';
+    }
+  }, [panOffset]);
+
+  // Reset pan offset when page changes
+  useEffect(() => {
+    setPanOffset({ x: 0, y: 0 });
+  }, [viewport.page]);
+
   // const renderAnnotation = (annotation: Annotation, pageNumber: number) => {
   //   if (annotation.page !== pageNumber) return null;
 
@@ -1798,7 +1895,7 @@ export default function PDFViewer({
         ) : (
           <div className="p-4 flex justify-center items-start">
             {documentUrl ? (
-              <div id="pdfContainer" className="relative inline-block">
+              <div id="pdfContainer" ref={pdfContainerRef} className="relative inline-block">
                 <canvas
                   ref={canvasRef}
                   id="pdfCanvas"
