@@ -66,3 +66,4 @@ Or use existing `JWT_SECRET` (will fallback to it).
 - Database structure unchanged
 - All existing users work with NextAuth
 
+

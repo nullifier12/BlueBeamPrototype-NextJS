@@ -42,22 +42,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             return null;
           }
 
-          // If projectId is provided, verify user has access to it
+          // If projectId is provided, verify project exists (no access check - any user can access any project)
           let projectId: string | undefined;
           if (credentials.projectId) {
             const projectIdValue = credentials.projectId as string;
-            const projectAccess = await query<
-              ProjectRow & { project_id: string }
-            >(
-              `SELECT p.id, p.project_id 
-               FROM projects p
-               INNER JOIN project_users pu ON p.id = pu.project_id
-               WHERE pu.user_id = ? AND (p.project_id = ? OR p.id = ?)`,
-              [user.id, projectIdValue, projectIdValue]
+            const projects = await query<ProjectRow>(
+              `SELECT id, project_id 
+               FROM projects 
+               WHERE project_id = ? OR id = ?`,
+              [projectIdValue, projectIdValue]
             );
 
-            if (projectAccess.length > 0) {
-              projectId = projectAccess[0].id;
+            if (projects.length > 0) {
+              projectId = projects[0].id;
             }
           }
 

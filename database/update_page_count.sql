@@ -11,3 +11,4 @@
 -- View documents with their current page counts
 -- SELECT id, name, page_count, file_size FROM documents WHERE status = 'active' ORDER BY created_at DESC;
 
+
