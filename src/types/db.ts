@@ -109,6 +109,20 @@ export interface ProjectUserRow extends RowDataPacket {
   role: string;
 }
 
+export interface ProjectNoteRow extends RowDataPacket {
+  id: string;
+  project_id: string;
+  author_id: string;
+  message: string;
+  mentions: string | null; // JSON string
+  created_at: Date;
+  updated_at: Date;
+  author_name?: string;
+  author_username?: string;
+  author_email?: string;
+  author_color?: string;
+}
+
 export type QueryResult<T extends RowDataPacket> = T[];
 export type QueryParams = (string | number | null | undefined)[];
 

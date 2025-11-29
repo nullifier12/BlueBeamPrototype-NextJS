@@ -1,4 +1,4 @@
-import { User, Project, PDFDocument, Annotation, PunchListItem } from "@/types";
+import { User, Project, PDFDocument, Annotation, PunchListItem, ProjectNote } from "@/types";
 
 const API_BASE = "/api";
 
@@ -171,4 +171,29 @@ export async function deletePunchItem(id: string) {
   return apiRequest<{ success: boolean }>(`/punch-items/${id}`, {
     method: "DELETE",
   });
+}
+
+// Project Notes
+export async function getProjectNotes(projectId: string) {
+  return apiRequest<{ notes: ProjectNote[] }>(
+    `/project-notes?projectId=${projectId}`
+  );
+}
+
+export async function createProjectNote(
+  projectId: string,
+  message: string,
+  mentions: string[] = []
+) {
+  return apiRequest<{ note: ProjectNote }>("/project-notes", {
+    method: "POST",
+    body: JSON.stringify({ projectId, message, mentions }),
+  });
+}
+
+// Project Users (for mentions)
+export async function getProjectUsers(projectId: string) {
+  return apiRequest<{ users: User[] }>(
+    `/projects/${projectId}/users`
+  );
 }

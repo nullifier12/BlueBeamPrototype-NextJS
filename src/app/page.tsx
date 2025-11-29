@@ -1154,8 +1154,7 @@ export default function BlueBeamApp() {
           onCompanyNameChange={handleCompanyNameChange}
           calibrationFactor={calibrationFactor}
           onCalibrationChange={handleCalibrationChange}
-          projectNotes={projectNotes}
-          onProjectNotesChange={handleProjectNotesChange}
+          currentUser={currentUser}
         />
 
         <div className="flex-1 flex">

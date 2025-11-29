@@ -165,3 +165,13 @@ export interface PunchListSummary {
   closed: number;
   progressPercent: number;
 }
+
+export interface ProjectNote {
+  id: string;
+  projectId: string;
+  author: User;
+  message: string;
+  mentions: string[]; // Array of user IDs mentioned
+  createdAt: Date;
+  updatedAt: Date;
+}

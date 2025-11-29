@@ -90,7 +90,7 @@ export async function PUT(
     // Verify user has access
     let access = await query<ProjectUserRow>(
       'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-      [project.id, decoded.userId]
+      [project.id, session.user.id]
     );
 
     // Auto-assign user to project if they don't have access
@@ -98,20 +98,17 @@ export async function PUT(
       const assignId = randomUUID();
       await query(
         'INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)',
-        [assignId, project.id, decoded.userId, 'member']
+        [assignId, project.id, session.user.id, 'member']
       );
-      console.log(`Auto-assigned user ${decoded.userId} to project ${project.id} as member`);
+      console.log(`Auto-assigned user ${session.user.id} to project ${project.id} as member`);
       // Re-fetch access
       access = await query<ProjectUserRow>(
         'SELECT role FROM project_users WHERE project_id = ? AND user_id = ?',
-        [project.id, decoded.userId]
+        [project.id, session.user.id]
       );
     }
 
-    // Only owners and admins can update projects
-    if (access[0].role !== 'owner' && access[0].role !== 'admin') {
-      return NextResponse.json({ error: 'No permission to update project' }, { status: 403 });
-    }
+    // Any authenticated user can update projects (no role restriction)
 
     // Build dynamic UPDATE query - only update fields that are provided
     const updateFields: string[] = [];

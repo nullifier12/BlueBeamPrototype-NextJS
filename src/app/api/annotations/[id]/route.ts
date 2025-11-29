@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "../../auth/[...nextauth]/route";
 import { query } from "@/lib/db";
+import { randomUUID } from "crypto";
 import { AnnotationRow, ProjectUserRow } from "@/types";
 
 export async function PUT(
@@ -32,15 +33,23 @@ export async function PUT(
     const annotation = annotations[0];
 
     // Verify user has access to project
-    const access = await query<ProjectUserRow>(
+    let access = await query<ProjectUserRow>(
       "SELECT role FROM project_users WHERE project_id = ? AND user_id = ?",
       [annotation.project_id, session.user.id]
     );
 
+    // Auto-assign user to project if they don't have access
     if (access.length === 0) {
-      return NextResponse.json(
-        { error: "No access to project" },
-        { status: 403 }
+      const assignId = randomUUID();
+      await query(
+        "INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)",
+        [assignId, annotation.project_id, session.user.id, "member"]
+      );
+      console.log(`Auto-assigned user ${session.user.id} to project ${annotation.project_id} as member`);
+      // Re-fetch access
+      access = await query<ProjectUserRow>(
+        "SELECT role FROM project_users WHERE project_id = ? AND user_id = ?",
+        [annotation.project_id, session.user.id]
       );
     }
 
@@ -155,15 +164,23 @@ export async function DELETE(
     }
 
     // Verify user has access to project
-    const access = await query<ProjectUserRow>(
+    let access = await query<ProjectUserRow>(
       "SELECT role FROM project_users WHERE project_id = ? AND user_id = ?",
       [annotations[0].project_id, session.user.id]
     );
 
+    // Auto-assign user to project if they don't have access
     if (access.length === 0) {
-      return NextResponse.json(
-        { error: "No access to project" },
-        { status: 403 }
+      const assignId = randomUUID();
+      await query(
+        "INSERT INTO project_users (id, project_id, user_id, role) VALUES (?, ?, ?, ?)",
+        [assignId, annotations[0].project_id, session.user.id, "member"]
+      );
+      console.log(`Auto-assigned user ${session.user.id} to project ${annotations[0].project_id} as member`);
+      // Re-fetch access
+      access = await query<ProjectUserRow>(
+        "SELECT role FROM project_users WHERE project_id = ? AND user_id = ?",
+        [annotations[0].project_id, session.user.id]
       );
     }
 

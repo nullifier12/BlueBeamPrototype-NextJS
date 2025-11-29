@@ -16,8 +16,9 @@ import {
   Save,
   Ruler
 } from "lucide-react";
-import { PDFDocument, PunchListItem, PunchListSummary } from "@/types";
+import { PDFDocument, PunchListItem, PunchListSummary, User } from "@/types";
 import { cn } from "@/utils/cn";
+import ProjectNotes from "./ProjectNotes";
 
 interface ProjectLeftPanelProps {
   documents: PDFDocument[];
@@ -37,8 +38,7 @@ interface ProjectLeftPanelProps {
   onCompanyNameChange: (name: string) => void;
   calibrationFactor: number;
   onCalibrationChange: (factor: number) => void;
-  projectNotes: string;
-  onProjectNotesChange: (notes: string) => void;
+  currentUser: User | null;
 }
 
 export default function ProjectLeftPanel({
@@ -58,10 +58,8 @@ export default function ProjectLeftPanel({
   onCompanyNameChange,
   calibrationFactor,
   onCalibrationChange,
-  projectNotes,
-  onProjectNotesChange,
+  currentUser,
 }: ProjectLeftPanelProps) {
-  const [isNotesExpanded, setIsNotesExpanded] = useState(true);
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
@@ -80,15 +78,6 @@ export default function ProjectLeftPanel({
       minute: "2-digit",
     }).format(date);
   };
-
-
-  const handleAddNote = useCallback(() => {
-    if (projectNotes.trim()) {
-      console.log('Adding project note:', projectNotes);
-      // Here you could add the note to a notes list or send to server
-      onProjectNotesChange('');
-    }
-  }, [projectNotes, onProjectNotesChange]);
 
   return (
     <div className="w-80 border-r border-border bg-secondary flex flex-col">
@@ -284,43 +273,7 @@ export default function ProjectLeftPanel({
         </div>
 
         {/* Project Notes Section - Collaborative Messaging Style */}
-        <div className="p-4 border-t border-border">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold">Project Notes</h3>
-            <button
-              onClick={() => setIsNotesExpanded(!isNotesExpanded)}
-              className="p-1 hover:bg-muted rounded transition-colors"
-            >
-              {isNotesExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            </button>
-          </div>
-          
-          {isNotesExpanded && (
-            <div className="space-y-3">
-              <div className="text-xs text-muted-foreground mb-2">
-                Collaborative, parang msgr conversation style po
-              </div>
-              <textarea
-                placeholder="Write project notes here... (Collaborative messaging style)"
-                value={projectNotes}
-                onChange={(e) => onProjectNotesChange(e.target.value)}
-                className="w-full px-3 py-2 border border-border rounded-md bg-input text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                rows={4}
-              />
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={handleAddNote}
-                  className="px-3 py-1 bg-primary text-primary-foreground text-xs rounded-md hover:bg-primary/90 transition-colors"
-                >
-                  Send Message
-                </button>
-                <span className="text-xs text-muted-foreground">
-                  Team collaboration notes
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
+        <ProjectNotes projectId={projectId} currentUser={currentUser} />
 
       </div>
     </div>
