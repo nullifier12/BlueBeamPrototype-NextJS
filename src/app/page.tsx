@@ -18,6 +18,8 @@ import {
   PunchListItem,
 } from "@/types";
 import * as api from "@/lib/api";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
 export default function BlueBeamApp() {
   const { data: session, status } = useSession();
@@ -43,6 +45,7 @@ export default function BlueBeamApp() {
   const [projectNotes, setProjectNotes] = useState<string>("");
   const [punchItems, setPunchItems] = useState<PunchListItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<Viewport>({
     zoom: 1,
     rotation: 0,
@@ -97,22 +100,43 @@ export default function BlueBeamApp() {
     setLoading(true);
     try {
       // Load project details
-      const projectData = await api.getProject(currentProjectId);
-      if (projectData.project) {
-        const p = projectData.project;
-        setProjectId(p.project_id || p.id);
-        setProjectName(p.name || "");
-        setProjectLocation(p.location || "");
-        setProjectTargetCompletion(p.target_completion || "");
-        setCompanyName(p.company_name || "");
-        setCalibrationFactor(
-          p.calibration_factor
-            ? (typeof p.calibration_factor === "number"
-                ? p.calibration_factor
-                : parseFloat(p.calibration_factor)) || 1.0
-            : p.calibrationFactor || 1.0
-        );
-        setProjectNotes(p.project_notes || "");
+      try {
+        const projectData = await api.getProject(currentProjectId);
+        if (projectData.project) {
+          const p = projectData.project;
+          setProjectId(p.project_id || p.id);
+          setProjectName(p.name || "");
+          setProjectLocation(p.location || "");
+          setProjectTargetCompletion(p.target_completion || "");
+          setCompanyName(p.company_name || "");
+          setCalibrationFactor(
+            p.calibration_factor
+              ? (typeof p.calibration_factor === "number"
+                  ? p.calibration_factor
+                  : parseFloat(p.calibration_factor)) || 1.0
+              : p.calibrationFactor || 1.0
+          );
+          setProjectNotes(p.project_notes || "");
+        }
+      } catch (projectError: any) {
+        // Handle project not found gracefully
+        if (projectError?.message?.includes("Project not found")) {
+          console.warn("Project not found:", currentProjectId);
+          // Clear project-related state
+          setProjectId("");
+          setProjectName("");
+          setProjectLocation("");
+          setProjectTargetCompletion("");
+          setCompanyName("");
+          setCalibrationFactor(1.0);
+          setProjectNotes("");
+          setDocuments([]);
+          setAnnotations([]);
+          setPunchItems([]);
+          setLoading(false);
+          return;
+        }
+        throw projectError; // Re-throw if it's a different error
       }
 
       // Load documents
@@ -491,6 +515,9 @@ export default function BlueBeamApp() {
           "polyline",
           "arc",
           "measurement",
+          "arrow",
+          "line",
+          "calibrate",
         ];
 
         if (autoPunchTypes.includes(annotation.type)) {
@@ -634,21 +661,65 @@ export default function BlueBeamApp() {
               : ann
           )
         );
+        
+        // Update corresponding punch item if it exists (without circular dependency)
+        const relatedPunchItem = punchItems.find(
+          (item) => item.annotationId === updatedAnnotation.id
+        );
+        if (relatedPunchItem) {
+          // Update punch item position and page to match annotation
+          const updatedPunchItem: PunchListItem = {
+            ...relatedPunchItem,
+            page: updatedAnnotation.page,
+            position: updatedAnnotation.position,
+            demarcation: getDemarcationText(updatedAnnotation),
+            location: getLocationText(updatedAnnotation),
+          };
+          // Call API directly to avoid circular dependency
+          try {
+            await api.updatePunchItem(updatedPunchItem.id, updatedPunchItem);
+            setPunchItems((prev) =>
+              prev.map((punchItem) =>
+                punchItem.id === updatedPunchItem.id
+                  ? { ...updatedPunchItem, updatedAt: new Date() }
+                  : punchItem
+              )
+            );
+          } catch (error) {
+            console.error("Error updating punch item from annotation update:", error);
+          }
+        }
       } catch (error) {
         console.error("Error updating annotation:", error);
       }
     },
-    []
+    [punchItems]
   );
 
   const handleAnnotationDelete = useCallback(async (annotationId: string) => {
     try {
+      // Find and delete associated punch item first (without circular dependency)
+      const relatedPunchItem = punchItems.find(
+        (item) => item.annotationId === annotationId
+      );
+      if (relatedPunchItem) {
+        console.log("Deleting associated punch item:", relatedPunchItem.id);
+        // Delete punch item directly without calling handlePunchItemDelete to avoid circular dependency
+        try {
+          await api.deletePunchItem(relatedPunchItem.id);
+          setPunchItems((prev) => prev.filter((item) => item.id !== relatedPunchItem.id));
+        } catch (error) {
+          console.error("Error deleting punch item:", error);
+        }
+      }
+      
+      // Delete the annotation
       await api.deleteAnnotation(annotationId);
       setAnnotations((prev) => prev.filter((ann) => ann.id !== annotationId));
     } catch (error) {
       console.error("Error deleting annotation:", error);
     }
-  }, []);
+  }, [punchItems]);
 
   const handleProjectIdChange = useCallback((newProjectId: string) => {
     // Just update the projectId state - don't trigger API calls while typing
@@ -754,19 +825,57 @@ export default function BlueBeamApp() {
             : punchItem
         )
       );
+      
+      // Update corresponding annotation if it exists (without circular dependency)
+      if (item.annotationId) {
+        const relatedAnnotation = annotations.find(
+          (ann) => ann.id === item.annotationId
+        );
+        if (relatedAnnotation) {
+          // Update annotation position and page to match punch item
+          const updatedAnnotation: Annotation = {
+            ...relatedAnnotation,
+            page: item.page || relatedAnnotation.page,
+            position: item.position || relatedAnnotation.position,
+          };
+          // Call API directly to avoid circular dependency
+          try {
+            await api.updateAnnotation(updatedAnnotation.id, updatedAnnotation);
+            setAnnotations((prev) =>
+              prev.map((ann) =>
+                ann.id === updatedAnnotation.id
+                  ? { ...updatedAnnotation, updatedAt: new Date() }
+                  : ann
+              )
+            );
+          } catch (error) {
+            console.error("Error updating annotation from punch item update:", error);
+          }
+        }
+      }
     } catch (error) {
       console.error("Error updating punch item:", error);
     }
-  }, []);
+  }, [annotations]);
 
   const handlePunchItemDelete = useCallback(async (id: string) => {
     try {
+      // Find the punch item to get its annotationId
+      const punchItem = punchItems.find((item) => item.id === id);
+      
+      // Delete the punch item
       await api.deletePunchItem(id);
       setPunchItems((prev) => prev.filter((item) => item.id !== id));
+      
+      // If punch item has an annotationId, delete the associated annotation
+      if (punchItem?.annotationId) {
+        console.log("🗑️ Deleting associated annotation:", punchItem.annotationId);
+        await handleAnnotationDelete(punchItem.annotationId);
+      }
     } catch (error) {
       console.error("Error deleting punch item:", error);
     }
-  }, []);
+  }, [punchItems, handleAnnotationDelete]);
 
   const handleUploadDocument = useCallback(() => {
     console.log("🔓 Opening upload modal...");
@@ -1047,6 +1156,358 @@ export default function BlueBeamApp() {
     projectNotes,
   ]);
 
+  const handleDownload = useCallback(async () => {
+    if (!selectedDocument || typeof window === "undefined" || !window.pdfjsLib) {
+      console.error("Cannot download: missing document or PDF.js");
+      return;
+    }
+
+    try {
+      console.log("📥 Starting document download...");
+      
+      // Filter annotations and punch items for this document
+      const docAnnotations = annotations.filter(
+        (ann) => ann.documentId === selectedDocument.id
+      );
+      const docPunchItems = punchItems.filter(
+        (item) => item.documentId === selectedDocument.id
+      );
+
+      // Calculate progress
+      const totalItems = docPunchItems.length;
+      const closedItems = docPunchItems.filter((item) => item.status === "Closed").length;
+      const inProgressItems = docPunchItems.filter((item) => item.status === "In-Progress").length;
+      const openItems = docPunchItems.filter((item) => item.status === "Open").length;
+      const progressPercent = totalItems > 0 ? Math.round((closedItems / totalItems) * 100) : 0;
+      const avgPercentComplete = totalItems > 0 
+        ? Math.round(docPunchItems.reduce((sum, item) => sum + item.percentComplete, 0) / totalItems)
+        : 0;
+
+      // Load PDF document - handle blob URL or base64
+      let pdfData: string | Uint8Array = selectedDocument.url;
+      
+      // If it's a blob URL, fetch it as array buffer
+      if (selectedDocument.url.startsWith("blob:")) {
+        try {
+          const response = await fetch(selectedDocument.url);
+          const arrayBuffer = await response.arrayBuffer();
+          pdfData = new Uint8Array(arrayBuffer);
+        } catch (fetchError) {
+          console.error("Error fetching blob URL:", fetchError);
+          // Fallback to URL
+          pdfData = selectedDocument.url;
+        }
+      }
+      
+      const loadingTask = window.pdfjsLib.getDocument(pdfData, {
+        cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
+        cMapPacked: true,
+      });
+      const pdf = await loadingTask.promise;
+      const numPages = pdf.numPages;
+
+      // Create jsPDF instance (A4 size)
+      const pdfDoc = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+
+      // Add cover page with project info and progress
+      pdfDoc.setFontSize(20);
+      pdfDoc.text("Project Document Report", 105, 20, { align: "center" });
+      
+      pdfDoc.setFontSize(12);
+      pdfDoc.text(`Project: ${projectName || "N/A"}`, 20, 35);
+      pdfDoc.text(`Location: ${projectLocation || "N/A"}`, 20, 42);
+      pdfDoc.text(`Company: ${companyName || "N/A"}`, 20, 49);
+      pdfDoc.text(`Document: ${selectedDocument.name}`, 20, 56);
+      pdfDoc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 63);
+
+      // Progress section
+      pdfDoc.setFontSize(14);
+      pdfDoc.text("Progress Summary", 20, 75);
+      pdfDoc.setFontSize(12);
+      pdfDoc.text(`Total Items: ${totalItems}`, 20, 82);
+      pdfDoc.text(`Open: ${openItems}`, 20, 89);
+      pdfDoc.text(`In Progress: ${inProgressItems}`, 20, 96);
+      pdfDoc.text(`Closed: ${closedItems}`, 20, 103);
+      pdfDoc.text(`Progress: ${progressPercent}%`, 20, 110);
+      pdfDoc.text(`Average Completion: ${avgPercentComplete}%`, 20, 117);
+
+      // Render PDF pages with annotations
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        if (pageNum > 1) {
+          pdfDoc.addPage();
+        }
+
+        try {
+          // Get PDF page
+          const page = await pdf.getPage(pageNum);
+          
+          // Get base viewport (scale 1.0) to understand actual PDF page dimensions
+          const baseViewport = page.getViewport({ scale: 1.0 });
+          
+          // Use higher scale for better quality rendering
+          const renderScale = 2.0;
+          const viewport = page.getViewport({ scale: renderScale });
+          
+          // Create canvas for PDF page
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+          if (!context) continue;
+          
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+
+          // Render PDF page
+          await page.render({
+            canvasContext: context,
+            viewport: viewport,
+          }).promise;
+
+          // Draw annotations on canvas
+          // Annotations are stored in base scale coordinates (relative to PDF page at 100% zoom)
+          // We need to scale them to match the render viewport
+          const pageAnnotations = docAnnotations.filter((ann) => ann.page === pageNum);
+          for (const annotation of pageAnnotations) {
+            context.save();
+            // Scale annotations from base scale (1.0) to render scale (2.0)
+            const scale = renderScale;
+            const x = annotation.position.x * scale;
+            const y = annotation.position.y * scale;
+            const width = (annotation.position.width || 0) * scale;
+            const height = (annotation.position.height || 0) * scale;
+
+            switch (annotation.type) {
+              case "rectangle":
+                context.fillStyle = "rgba(11,116,222,0.3)";
+                context.strokeStyle = "#0b74de";
+                context.lineWidth = 2 * scale;
+                context.fillRect(x, y, width, height);
+                context.strokeRect(x, y, width, height);
+                break;
+              case "circle":
+                context.strokeStyle = "#0b74de";
+                context.lineWidth = 2 * scale;
+                context.beginPath();
+                context.arc(x, y, width, 0, 2 * Math.PI);
+                context.stroke();
+                break;
+              case "ellipse":
+                context.strokeStyle = "#0b74de";
+                context.lineWidth = 2 * scale;
+                context.beginPath();
+                context.ellipse(x, y, width, height, 0, 0, 2 * Math.PI);
+                context.stroke();
+                break;
+              case "line":
+              case "arrow":
+              case "measurement":
+              case "calibrate":
+                const strokeColor = annotation.type === "measurement" ? "#ff6b00" 
+                  : annotation.type === "calibrate" ? "red" : "#000";
+                context.strokeStyle = strokeColor;
+                context.lineWidth = 2 * scale;
+                context.beginPath();
+                context.moveTo(x, y);
+                context.lineTo(x + width, y + height);
+                context.stroke();
+                // Draw arrowhead for arrow
+                if (annotation.type === "arrow") {
+                  const angle = Math.atan2(height, width);
+                  const arrowLength = 10 * scale;
+                  context.beginPath();
+                  context.moveTo(x + width, y + height);
+                  context.lineTo(
+                    x + width - arrowLength * Math.cos(angle - Math.PI / 6),
+                    y + height - arrowLength * Math.sin(angle - Math.PI / 6)
+                  );
+                  context.moveTo(x + width, y + height);
+                  context.lineTo(
+                    x + width - arrowLength * Math.cos(angle + Math.PI / 6),
+                    y + height - arrowLength * Math.sin(angle + Math.PI / 6)
+                  );
+                  context.stroke();
+                }
+                break;
+              case "polyline":
+                if (annotation.position.points && Array.isArray(annotation.position.points)) {
+                  context.strokeStyle = "#0b74de";
+                  context.lineWidth = 2 * scale;
+                  context.beginPath();
+                  annotation.position.points.forEach((point: { x: number; y: number }, index: number) => {
+                    const px = point.x * scale;
+                    const py = point.y * scale;
+                    if (index === 0) {
+                      context.moveTo(px, py);
+                    } else {
+                      context.lineTo(px, py);
+                    }
+                  });
+                  context.stroke();
+                }
+                break;
+              case "arc":
+                if (annotation.position.points && annotation.position.points.length >= 3) {
+                  context.strokeStyle = "#0b74de";
+                  context.lineWidth = 2 * scale;
+                  const [start, center, end] = annotation.position.points;
+                  const scaledStart = { x: start.x * scale, y: start.y * scale };
+                  const scaledCenter = { x: center.x * scale, y: center.y * scale };
+                  const scaledEnd = { x: end.x * scale, y: end.y * scale };
+                  const startAngle = Math.atan2(scaledStart.y - scaledCenter.y, scaledStart.x - scaledCenter.x);
+                  const endAngle = Math.atan2(scaledEnd.y - scaledCenter.y, scaledEnd.x - scaledCenter.x);
+                  const radius = Math.sqrt(
+                    Math.pow(scaledStart.x - scaledCenter.x, 2) + Math.pow(scaledStart.y - scaledCenter.y, 2)
+                  );
+                  context.beginPath();
+                  context.arc(scaledCenter.x, scaledCenter.y, radius, startAngle, endAngle);
+                  context.stroke();
+                }
+                break;
+              case "cloud":
+              case "freehand":
+                if (annotation.position.pathData) {
+                  // Parse and scale path data
+                  const pathCommands = annotation.position.pathData.split(/(?=[ML])/);
+                  context.strokeStyle = annotation.type === "cloud" ? "#00CCCC" : "#000";
+                  context.lineWidth = 2 * scale;
+                  context.beginPath();
+                  pathCommands.forEach((cmd: string) => {
+                    if (cmd.startsWith("M") || cmd.startsWith("L")) {
+                      const coords = cmd.substring(1).trim().split(/\s+/).map(Number);
+                      if (coords.length >= 2) {
+                        const px = coords[0] * scale;
+                        const py = coords[1] * scale;
+                        if (cmd.startsWith("M")) {
+                          context.moveTo(px, py);
+                        } else {
+                          context.lineTo(px, py);
+                        }
+                      }
+                    }
+                  });
+                  context.stroke();
+                  if (annotation.type === "cloud") {
+                    context.fillStyle = "rgba(0,204,204,0.3)";
+                    context.fill();
+                  }
+                }
+                break;
+              case "sticky-note":
+                context.fillStyle = "#FFA500";
+                context.strokeStyle = "#000";
+                context.lineWidth = 1 * scale;
+                context.fillRect(x, y, width, height);
+                context.strokeRect(x, y, width, height);
+                if (annotation.content) {
+                  context.fillStyle = "#000";
+                  context.font = `${12 * scale}px Arial`;
+                  context.fillText(annotation.content, x + 5 * scale, y + 15 * scale);
+                }
+                break;
+            }
+            context.restore();
+          }
+
+          // Convert canvas to image and add to PDF
+          const imgData = canvas.toDataURL("image/png");
+          const imgWidth = 190; // A4 width minus margins
+          const imgHeight = (canvas.height * imgWidth) / canvas.width;
+          
+          pdfDoc.addImage(imgData, "PNG", 10, 10, imgWidth, imgHeight);
+        } catch (pageError) {
+          console.error(`Error rendering page ${pageNum}:`, pageError);
+        }
+      }
+
+      // Add punch list table
+      if (docPunchItems.length > 0) {
+        pdfDoc.addPage();
+        pdfDoc.setFontSize(16);
+        pdfDoc.text("Punch List", 105, 20, { align: "center" });
+
+        // Table headers
+        pdfDoc.setFontSize(10);
+        let yPos = 35;
+        const colWidths = [15, 30, 50, 30, 30, 25, 30];
+        const headers = ["ID", "Description", "Location", "Status", "Progress", "Page", "Assigned"];
+        
+        pdfDoc.setFillColor(200, 200, 200);
+        pdfDoc.rect(10, yPos - 5, 190, 8, "F");
+        pdfDoc.setTextColor(0, 0, 0);
+        pdfDoc.setFont("helvetica", "bold");
+        
+        let xPos = 10;
+        headers.forEach((header, index) => {
+          pdfDoc.text(header, xPos + 2, yPos, { maxWidth: colWidths[index] - 4 });
+          xPos += colWidths[index];
+        });
+
+        // Table rows
+        pdfDoc.setFont("helvetica", "normal");
+        yPos = 45;
+        docPunchItems.forEach((item, index) => {
+          if (yPos > 270) {
+            // New page if needed
+            pdfDoc.addPage();
+            yPos = 20;
+            // Redraw headers
+            pdfDoc.setFillColor(200, 200, 200);
+            pdfDoc.rect(10, yPos - 5, 190, 8, "F");
+            pdfDoc.setFont("helvetica", "bold");
+            xPos = 10;
+            headers.forEach((header, idx) => {
+              pdfDoc.text(header, xPos + 2, yPos, { maxWidth: colWidths[idx] - 4 });
+              xPos += colWidths[idx];
+            });
+            pdfDoc.setFont("helvetica", "normal");
+            yPos = 30;
+          }
+
+          xPos = 10;
+          pdfDoc.text(item.demarcationId || String(index + 1), xPos + 2, yPos, { maxWidth: colWidths[0] - 4 });
+          xPos += colWidths[0];
+          
+          pdfDoc.text(item.description || "N/A", xPos + 2, yPos, { maxWidth: colWidths[1] - 4 });
+          xPos += colWidths[1];
+          
+          pdfDoc.text(item.location || "N/A", xPos + 2, yPos, { maxWidth: colWidths[2] - 4 });
+          xPos += colWidths[2];
+          
+          pdfDoc.text(item.status || "Open", xPos + 2, yPos, { maxWidth: colWidths[3] - 4 });
+          xPos += colWidths[3];
+          
+          pdfDoc.text(`${item.percentComplete}%`, xPos + 2, yPos, { maxWidth: colWidths[4] - 4 });
+          xPos += colWidths[4];
+          
+          pdfDoc.text(item.page?.toString() || "N/A", xPos + 2, yPos, { maxWidth: colWidths[5] - 4 });
+          xPos += colWidths[5];
+          
+          pdfDoc.text(item.assignedTo || "N/A", xPos + 2, yPos, { maxWidth: colWidths[6] - 4 });
+          
+          yPos += 8;
+        });
+      }
+
+      // Save PDF
+      const fileName = `${selectedDocument.name.replace(".pdf", "")}_with_annotations.pdf`;
+      pdfDoc.save(fileName);
+      console.log("✅ Document downloaded successfully");
+    } catch (error) {
+      console.error("❌ Error downloading document:", error);
+      alert("Error downloading document. Please try again.");
+    }
+  }, [
+    selectedDocument,
+    annotations,
+    punchItems,
+    projectName,
+    projectLocation,
+    companyName,
+  ]);
+
   const handleImport = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
@@ -1148,6 +1609,7 @@ export default function BlueBeamApp() {
         onUndo={handleUndo}
         onRedo={handleRedo}
         onUpload={handleUploadDocument}
+        onDownload={handleDownload}
         onExport={handleExport}
         onImport={handleImport}
         onLogout={handleLogout}
@@ -1191,7 +1653,10 @@ export default function BlueBeamApp() {
                   onViewportChange={setViewport}
                   onAnnotationCreate={handleAnnotationCreate}
                   onAnnotationUpdate={handleAnnotationUpdate}
+                  onAnnotationDelete={handleAnnotationDelete}
                   onPunchItemImageUpdate={handlePunchItemImageUpdate}
+                  selectedAnnotationId={selectedAnnotationId}
+                  onSelectedAnnotationIdChange={setSelectedAnnotationId}
                 />
               ) : (
                 <div className="flex-1 flex items-center justify-center bg-muted">
@@ -1262,6 +1727,21 @@ export default function BlueBeamApp() {
         onPunchItemCreate={handlePunchItemCreate}
         onPunchItemUpdate={handlePunchItemUpdate}
         onPunchItemDelete={handlePunchItemDelete}
+        onDemarcationClick={(item) => {
+          // Navigate to annotation if it has an annotationId
+          if (item.annotationId) {
+            setSelectedAnnotationId(item.annotationId);
+            // Find the annotation
+            const annotation = annotations.find((ann) => ann.id === item.annotationId);
+            if (annotation) {
+              // Navigate to the page
+              setViewport((prev) => ({ ...prev, page: annotation.page }));
+            }
+          } else if (item.page) {
+            // If no annotationId, just navigate to the page
+            setViewport((prev) => ({ ...prev, page: item.page! }));
+          }
+        }}
       />
     </div>
   );

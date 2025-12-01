@@ -29,6 +29,7 @@ import {
   FileUp,
   CurlyBraces,
   LogOut,
+  Eraser,
 } from "lucide-react";
 import { Tool, AnnotationType } from "@/types";
 import { cn } from "@/utils/cn";
@@ -43,6 +44,7 @@ interface ToolbarProps {
   onUndo: () => void;
   onRedo: () => void;
   onUpload: () => void;
+  onDownload: () => void;
   onExport: () => void;
   onImport: () => void;
   onLogout?: () => void;
@@ -155,6 +157,14 @@ const tools: Tool[] = [
     shortcut: "F",
     isActive: false,
   },
+  {
+    id: "erase",
+    name: "Erase",
+    icon: "eraser",
+    type: "erase",
+    shortcut: "E",
+    isActive: false,
+  },
 ];
 
 const getIcon = (iconName: string, size: number = 16) => {
@@ -175,6 +185,7 @@ const getIcon = (iconName: string, size: number = 16) => {
     "curly-braces": CurlyBraces,
     cloud: Cloud,
     "pen-tool": PenTool,
+    eraser: Eraser,
   };
 
   const IconComponent = iconMap[iconName] || FileText;
@@ -191,6 +202,7 @@ export default function Toolbar({
   onUndo,
   onRedo,
   onUpload,
+  onDownload,
   onExport,
   onImport,
   onLogout,
@@ -207,7 +219,11 @@ export default function Toolbar({
         >
           <Upload size={16} />
         </button>
-        <button className="toolbar-button" title="Download Document">
+        <button 
+          className="toolbar-button" 
+          title="Download Document"
+          onClick={onDownload}
+        >
           <Download size={16} />
         </button>
         <button
@@ -236,7 +252,7 @@ export default function Toolbar({
       <div className="w-px h-6 bg-border mx-2" />
 
       {/* Edit Operations */}
-      <div className="flex gap-1">
+      {/* <div className="flex gap-1">
         <button
           className="toolbar-button"
           onClick={onUndo}
@@ -251,7 +267,7 @@ export default function Toolbar({
         >
           <Redo size={16} />
         </button>
-      </div>
+      </div> */}
 
       <div className="w-px h-6 bg-border mx-2" />
 
@@ -301,11 +317,7 @@ export default function Toolbar({
           <Settings size={16} />
         </button>
         {onLogout && (
-          <button 
-            className="toolbar-button" 
-            onClick={onLogout}
-            title="Logout"
-          >
+          <button className="toolbar-button" onClick={onLogout} title="Logout">
             <LogOut size={16} />
           </button>
         )}

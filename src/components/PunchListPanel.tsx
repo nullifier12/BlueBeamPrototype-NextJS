@@ -7,6 +7,7 @@ interface PunchListPanelProps {
   onPunchItemCreate: (item: Omit<PunchListItem, "id" | "createdAt" | "updatedAt">) => void;
   onPunchItemUpdate: (item: PunchListItem) => void;
   onPunchItemDelete: (id: string) => void;
+  onDemarcationClick?: (item: PunchListItem) => void;
 }
 
 export default function PunchListPanel({
@@ -14,6 +15,7 @@ export default function PunchListPanel({
   onPunchItemCreate,
   onPunchItemUpdate,
   onPunchItemDelete,
+  onDemarcationClick,
 }: PunchListPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [newItemDescription, setNewItemDescription] = useState("");
@@ -204,7 +206,11 @@ export default function PunchListPanel({
                         </td>
                         <td className="border border-border p-2">
                           {item.demarcationImage ? (
-                            <div className="w-16 h-16 border border-border rounded overflow-hidden bg-muted">
+                            <div 
+                              className="w-16 h-16 border border-border rounded overflow-hidden bg-muted cursor-pointer hover:border-primary hover:shadow-md transition-all"
+                              onClick={() => onDemarcationClick?.(item)}
+                              title={`Click to navigate to: ${item.demarcation || item.demarcationId || 'A'}`}
+                            >
                               <img 
                                 src={item.demarcationImage} 
                                 alt={`Demarcation ${item.demarcationId || 'A'}`}
@@ -217,7 +223,11 @@ export default function PunchListPanel({
                               />
                             </div>
                           ) : (
-                            <div className="w-16 h-16 border border-border rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                            <div 
+                              className="w-16 h-16 border border-border rounded bg-muted flex items-center justify-center text-xs text-muted-foreground cursor-pointer hover:border-primary hover:bg-primary/10 transition-all"
+                              onClick={() => onDemarcationClick?.(item)}
+                              title={`Click to navigate to: ${item.demarcation || item.demarcationId || 'A'}`}
+                            >
                               {item.demarcation || item.demarcationId || 'A'}
                             </div>
                           )}

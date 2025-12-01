@@ -27,23 +27,41 @@ export default function ProjectNotes({
 
   // Load project notes
   const loadNotes = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || projectId.trim() === "") {
+      setNotes([]);
+      return;
+    }
     try {
       const data = await api.getProjectNotes(projectId);
       setNotes(data.notes);
     } catch (error) {
-      console.error("Error loading project notes:", error);
+      // Only log unexpected errors (not "Project not found")
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.toLowerCase().includes("project not found")) {
+        console.error("Error loading project notes:", error);
+      }
+      // Don't show error to user if project not found - just clear notes
+      setNotes([]);
     }
   }, [projectId]);
 
   // Load project users for mentions
   const loadProjectUsers = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || projectId.trim() === "") {
+      setProjectUsers([]);
+      return;
+    }
     try {
       const data = await api.getProjectUsers(projectId);
       setProjectUsers(data.users);
     } catch (error) {
-      console.error("Error loading project users:", error);
+      // Only log unexpected errors (not "Project not found")
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.toLowerCase().includes("project not found")) {
+        console.error("Error loading project users:", error);
+      }
+      // Don't show error to user if project not found - just clear users
+      setProjectUsers([]);
     }
   }, [projectId]);
 

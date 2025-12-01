@@ -45,7 +45,8 @@ export type AnnotationType =
   | 'polyline'
   | 'arc'
   | 'cloud'
-  | 'freehand';
+  | 'freehand'
+  | 'erase';
 
 export interface Position {
   x: number;

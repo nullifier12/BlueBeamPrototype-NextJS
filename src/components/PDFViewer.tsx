@@ -17,7 +17,10 @@ interface PDFViewerProps {
     annotation: Omit<Annotation, "id" | "createdAt" | "updatedAt">
   ) => void;
   onAnnotationUpdate: (annotation: Annotation) => void;
+  onAnnotationDelete?: (annotationId: string) => void;
   onPunchItemImageUpdate?: (annotationId: string, imageData: string) => void;
+  selectedAnnotationId?: string | null;
+  onSelectedAnnotationIdChange?: (id: string | null) => void;
 }
 
 export default function PDFViewer({
@@ -30,7 +33,10 @@ export default function PDFViewer({
   onViewportChange,
   onAnnotationCreate,
   onAnnotationUpdate,
+  onAnnotationDelete,
   onPunchItemImageUpdate,
+  selectedAnnotationId,
+  onSelectedAnnotationIdChange,
 }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [isCreating, setIsCreating] = useState(false);
@@ -39,17 +45,100 @@ export default function PDFViewer({
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Arc drawing state
-  const [arcStartPoint, setArcStartPoint] = useState<{ x: number; y: number } | null>(null);
-  const [arcCenter, setArcCenter] = useState<{ x: number; y: number } | null>(null);
+  const [arcStartPoint, setArcStartPoint] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [arcCenter, setArcCenter] = useState<{ x: number; y: number } | null>(
+    null
+  );
   const [isDrawingArc, setIsDrawingArc] = useState(false);
-  const [arcPhase, setArcPhase] = useState<'start' | 'center' | 'end'>('start');
+  const [arcPhase, setArcPhase] = useState<"start" | "center" | "end">("start");
   const [isPointerDown, setIsPointerDown] = useState(false);
+  // Freehand drawing state
+  const [freehandPoints, setFreehandPoints] = useState<Array<{ x: number; y: number }>>([]);
+  const [isDrawingFreehand, setIsDrawingFreehand] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
+  const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(
+    null
+  );
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<Annotation | null>(null);
+  const [isBlinking, setIsBlinking] = useState(false);
+  
+  // Handle external annotation selection (from punch list)
+  useEffect(() => {
+    if (selectedAnnotationId) {
+      const annotation = annotations.find((ann) => ann.id === selectedAnnotationId);
+      if (annotation) {
+        setSelectedAnnotation(annotation);
+        // Start blinking animation
+        setIsBlinking(true);
+        // Stop blinking after 2 seconds
+        const blinkTimeout = setTimeout(() => {
+          setIsBlinking(false);
+        }, 2000);
+        
+        // Navigate to the annotation's page
+        if (annotation.page !== viewport.page) {
+          onViewportChange({ ...viewport, page: annotation.page });
+        }
+        // Scroll to annotation position after a short delay to allow page to render
+        setTimeout(() => {
+          if (containerRef.current && annotation.position) {
+            const scale = viewport.zoom;
+            const x = annotation.position.x * scale;
+            const y = annotation.position.y * scale;
+            // Scroll to annotation position
+            containerRef.current.scrollLeft = x - containerRef.current.clientWidth / 2;
+            containerRef.current.scrollTop = y - containerRef.current.clientHeight / 2;
+          }
+        }, 300);
+        
+        return () => {
+          clearTimeout(blinkTimeout);
+        };
+      }
+    } else {
+      setSelectedAnnotation(null);
+      setIsBlinking(false);
+    }
+  }, [selectedAnnotationId, annotations, viewport, onViewportChange]);
+  
+  // Clear selected annotation when page changes manually (not from navigation)
+  const prevPageRef = useRef(viewport.page);
+  const prevSelectedAnnotationIdRef = useRef(selectedAnnotationId);
+  useEffect(() => {
+    // Track if selectedAnnotationId changed (user clicked demarcation)
+    const annotationIdChanged = prevSelectedAnnotationIdRef.current !== selectedAnnotationId;
+    prevSelectedAnnotationIdRef.current = selectedAnnotationId;
+    
+    // If page changed manually (not from annotation navigation) and there's a selected annotation
+    if (prevPageRef.current !== viewport.page && selectedAnnotation && !annotationIdChanged) {
+      // If the selected annotation is not on the current page, clear selection
+      if (selectedAnnotation.page !== viewport.page) {
+        setSelectedAnnotation(null);
+        setIsBlinking(false);
+        // Clear selectedAnnotationId in parent component
+        if (onSelectedAnnotationIdChange) {
+          onSelectedAnnotationIdChange(null);
+        }
+      }
+    }
+    prevPageRef.current = viewport.page;
+  }, [viewport.page, selectedAnnotation, selectedAnnotationId, onSelectedAnnotationIdChange]);
+  
+  const [isDragging, setIsDragging] = useState(false);
+  const [originalAnnotationPos, setOriginalAnnotationPos] = useState<{ x: number; y: number; width?: number; height?: number } | null>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartCurrentRef = useRef<{ x: number; y: number } | null>(null);
+  // Local state for dragged annotation (for visual feedback only, no API call)
+  const [localDraggedAnnotation, setLocalDraggedAnnotation] = useState<Annotation | null>(null);
+  // Store original arc points when dragging starts
+  const originalArcPointsRef = useRef<Array<{ x: number; y: number }> | null>(null);
   const [pdfDoc, setPdfDoc] = useState<
     typeof window.pdfjsLib.PDFDocumentProxy | null
   >(null);
@@ -263,6 +352,58 @@ export default function PDFViewer({
 
     setupPDFWorker();
   }, []);
+  
+  // Helper function to generate cloud path (series of arcs)
+  const generateCloudPath = useCallback((x: number, y: number, width: number, height: number, scale: number): string => {
+    if (width < 10 || height < 10) {
+      // If too small, just return a simple arc
+      return `M ${x} ${y} A 5 5 0 1 1 ${x + 10} ${y}`;
+    }
+    
+    const arcSize = Math.min(width, height) * 0.15; // Arc size proportional to shape
+    const numArcs = 8; // Number of arcs around the rectangle
+    
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    const halfW = width / 2;
+    const halfH = height / 2;
+    
+    let path = "";
+    const points: { x: number; y: number }[] = [];
+    
+    // Generate points around the rectangle
+    for (let i = 0; i < numArcs; i++) {
+      const angle = (i / numArcs) * Math.PI * 2;
+      const offsetX = Math.cos(angle) * halfW;
+      const offsetY = Math.sin(angle) * halfH;
+      points.push({
+        x: centerX + offsetX,
+        y: centerY + offsetY,
+      });
+    }
+    
+    // Create path with arcs connecting the points
+    for (let i = 0; i < points.length; i++) {
+      const current = points[i];
+      const next = points[(i + 1) % points.length];
+      
+      if (i === 0) {
+        path += `M ${current.x} ${current.y} `;
+      }
+      
+      // Create arc to next point
+      const midX = (current.x + next.x) / 2;
+      const midY = (current.y + next.y) / 2;
+      const dist = Math.sqrt(Math.pow(next.x - current.x, 2) + Math.pow(next.y - current.y, 2));
+      const arcRadius = Math.min(arcSize, dist / 2);
+      
+      path += `A ${arcRadius} ${arcRadius} 0 0 1 ${next.x} ${next.y} `;
+    }
+    
+    path += "Z"; // Close the path
+    return path;
+  }, []);
+  
   const createAnnotationElement = useCallback(
     (annotation: Annotation): SVGElement | null => {
       const svgNS = "http://www.w3.org/2000/svg";
@@ -273,6 +414,9 @@ export default function PDFViewer({
       const y = annotation.position.y * scale;
       const width = (annotation.position.width || 0) * scale;
       const height = (annotation.position.height || 0) * scale;
+      
+      // Check if this annotation should be blinking
+      const shouldBlink = isBlinking && selectedAnnotation?.id === annotation.id;
 
       // Debug logging for line annotations
       if (annotation.type === "line") {
@@ -301,8 +445,15 @@ export default function PDFViewer({
           circle.setAttribute("cx", x.toString());
           circle.setAttribute("cy", y.toString());
           circle.setAttribute("r", width.toString());
-          circle.setAttribute("stroke", "#0b74de");
-          circle.setAttribute("stroke-width", "2");
+          if (shouldBlink) {
+            circle.setAttribute("stroke", "#ff0000");
+            circle.setAttribute("stroke-width", "4");
+            circle.setAttribute("opacity", "1");
+            circle.style.animation = "blink 0.5s ease-in-out infinite";
+          } else {
+            circle.setAttribute("stroke", "#0b74de");
+            circle.setAttribute("stroke-width", "2");
+          }
           circle.setAttribute("fill", "none");
           return circle;
 
@@ -312,8 +463,15 @@ export default function PDFViewer({
           ellipse.setAttribute("cy", y.toString());
           ellipse.setAttribute("rx", width.toString());
           ellipse.setAttribute("ry", height.toString());
-          ellipse.setAttribute("stroke", "#0b74de");
-          ellipse.setAttribute("stroke-width", "2");
+          if (shouldBlink) {
+            ellipse.setAttribute("stroke", "#ff0000");
+            ellipse.setAttribute("stroke-width", "4");
+            ellipse.setAttribute("opacity", "1");
+            ellipse.style.animation = "blink 0.5s ease-in-out infinite";
+          } else {
+            ellipse.setAttribute("stroke", "#0b74de");
+            ellipse.setAttribute("stroke-width", "2");
+          }
           ellipse.setAttribute("fill", "none");
           return ellipse;
 
@@ -338,9 +496,125 @@ export default function PDFViewer({
           line.setAttribute("y1", y.toString());
           line.setAttribute("x2", x2.toString());
           line.setAttribute("y2", y2.toString());
-          line.setAttribute("stroke", strokeColor);
-          line.setAttribute("stroke-width", "2");
+          if (shouldBlink) {
+            line.setAttribute("stroke", "#ff0000");
+            line.setAttribute("stroke-width", "4");
+            line.setAttribute("opacity", "1");
+            line.style.animation = "blink 0.5s ease-in-out infinite";
+          } else {
+            line.setAttribute("stroke", strokeColor);
+            line.setAttribute("stroke-width", "2");
+          }
           return line;
+
+        case "arrow":
+          // Create arrow as a group (line + arrowhead)
+          const arrowGroup = document.createElementNS(svgNS, "g");
+          
+          // Scale the end coordinates properly
+          const arrowX2 = (annotation.position.width || annotation.position.x) * scale;
+          const arrowY2 = (annotation.position.height || annotation.position.y) * scale;
+          
+          // Draw the line
+          const arrowLine = document.createElementNS(svgNS, "line");
+          arrowLine.setAttribute("x1", x.toString());
+          arrowLine.setAttribute("y1", y.toString());
+          arrowLine.setAttribute("x2", arrowX2.toString());
+          arrowLine.setAttribute("y2", arrowY2.toString());
+          if (shouldBlink) {
+            arrowLine.setAttribute("stroke", "#ff0000");
+            arrowLine.setAttribute("stroke-width", "4");
+            arrowLine.setAttribute("opacity", "1");
+            arrowLine.style.animation = "blink 0.5s ease-in-out infinite";
+          } else {
+            arrowLine.setAttribute("stroke", "#000");
+            arrowLine.setAttribute("stroke-width", "2");
+          }
+          arrowGroup.appendChild(arrowLine);
+          
+          // Calculate arrowhead direction and size
+          const dx = arrowX2 - x;
+          const dy = arrowY2 - y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length > 0) {
+            const arrowheadSize = 10 * scale;
+            const angle = Math.atan2(dy, dx);
+            
+            // Arrowhead points (triangle pointing in direction of line)
+            const arrowheadX1 = arrowX2 - arrowheadSize * Math.cos(angle - Math.PI / 6);
+            const arrowheadY1 = arrowY2 - arrowheadSize * Math.sin(angle - Math.PI / 6);
+            const arrowheadX2 = arrowX2 - arrowheadSize * Math.cos(angle + Math.PI / 6);
+            const arrowheadY2 = arrowY2 - arrowheadSize * Math.sin(angle + Math.PI / 6);
+            
+            // Create arrowhead as polygon
+            const arrowhead = document.createElementNS(svgNS, "polygon");
+            const arrowheadPoints = `${arrowX2},${arrowY2} ${arrowheadX1},${arrowheadY1} ${arrowheadX2},${arrowheadY2}`;
+            arrowhead.setAttribute("points", arrowheadPoints);
+            if (shouldBlink) {
+              arrowhead.setAttribute("fill", "#ff0000");
+              arrowhead.setAttribute("opacity", "1");
+              arrowhead.style.animation = "blink 0.5s ease-in-out infinite";
+            } else {
+              arrowhead.setAttribute("fill", "#000");
+            }
+            arrowhead.setAttribute("stroke", "none");
+            arrowGroup.appendChild(arrowhead);
+          }
+          
+          return arrowGroup;
+
+        case "freehand":
+          // Render freehand path
+          if (annotation.position.pathData) {
+            const freehandPath = document.createElementNS(svgNS, "path");
+            // Scale the path data points
+            const scaledPathData = annotation.position.pathData
+              .replace(/([ML])\s+([\d.-]+)\s+([\d.-]+)/g, (match, cmd, x, y) => {
+                const scaledX = parseFloat(x) / scale * viewport.zoom;
+                const scaledY = parseFloat(y) / scale * viewport.zoom;
+                return `${cmd} ${scaledX} ${scaledY}`;
+              });
+            freehandPath.setAttribute("d", scaledPathData);
+            if (shouldBlink) {
+              freehandPath.setAttribute("stroke", "#ff0000");
+              freehandPath.setAttribute("stroke-width", "4");
+              freehandPath.setAttribute("opacity", "1");
+              freehandPath.style.animation = "blink 0.5s ease-in-out infinite";
+            } else {
+              freehandPath.setAttribute("stroke", "#000");
+              freehandPath.setAttribute("stroke-width", "2");
+            }
+            freehandPath.setAttribute("fill", "none");
+            freehandPath.setAttribute("stroke-linecap", "round");
+            freehandPath.setAttribute("stroke-linejoin", "round");
+            return freehandPath;
+          } else if (annotation.position.points && Array.isArray(annotation.position.points)) {
+            // Fallback: generate path from points
+            const points = annotation.position.points;
+            const pathData = points
+              .map((point: { x: number; y: number }, index: number) => {
+                const scaledX = point.x * scale;
+                const scaledY = point.y * scale;
+                return index === 0 ? `M ${scaledX} ${scaledY}` : `L ${scaledX} ${scaledY}`;
+              })
+              .join(" ");
+            const freehandPath = document.createElementNS(svgNS, "path");
+            freehandPath.setAttribute("d", pathData);
+            if (shouldBlink) {
+              freehandPath.setAttribute("stroke", "#ff0000");
+              freehandPath.setAttribute("stroke-width", "4");
+              freehandPath.setAttribute("opacity", "1");
+              freehandPath.style.animation = "blink 0.5s ease-in-out infinite";
+            } else {
+              freehandPath.setAttribute("stroke", "#000");
+              freehandPath.setAttribute("stroke-width", "2");
+            }
+            freehandPath.setAttribute("fill", "none");
+            freehandPath.setAttribute("stroke-linecap", "round");
+            freehandPath.setAttribute("stroke-linejoin", "round");
+            return freehandPath;
+          }
+          return null;
 
         case "text":
           const text = document.createElementNS(svgNS, "text");
@@ -352,6 +626,40 @@ export default function PDFViewer({
           text.textContent = annotation.content || "Text";
           return text;
 
+        case "sticky-note":
+          // Create sticky note as a rectangle with text
+          const stickyNote = document.createElementNS(svgNS, "g");
+          
+          // Background rectangle (yellow/orange sticky note)
+          const stickyRect = document.createElementNS(svgNS, "rect");
+          const stickyWidth = width && width > 0 ? width : 100 * scale;
+          const stickyHeight = height && height > 0 ? height : 80 * scale;
+          stickyRect.setAttribute("x", x.toString());
+          stickyRect.setAttribute("y", y.toString());
+          stickyRect.setAttribute("width", stickyWidth.toString());
+          stickyRect.setAttribute("height", stickyHeight.toString());
+          stickyRect.setAttribute("fill", "#FFA500");
+          stickyRect.setAttribute("stroke", "#000");
+          stickyRect.setAttribute("stroke-width", "1");
+          stickyRect.setAttribute("opacity", "0.9");
+          stickyNote.appendChild(stickyRect);
+          
+          // Text content
+          const stickyText = document.createElementNS(svgNS, "text");
+          stickyText.setAttribute("x", (x + 5 * scale).toString());
+          stickyText.setAttribute("y", (y + 15 * scale).toString());
+          stickyText.setAttribute("fill", "#000");
+          stickyText.setAttribute("font-size", (10 * scale).toString());
+          stickyText.setAttribute("font-family", "Arial");
+          stickyText.setAttribute("font-weight", "normal");
+          // Wrap text if needed
+          const content = annotation.content || "Sticky Note";
+          const maxChars = Math.floor((stickyWidth - 10 * scale) / (6 * scale));
+          stickyText.textContent = content.length > maxChars ? content.substring(0, maxChars) + "..." : content;
+          stickyNote.appendChild(stickyText);
+          
+          return stickyNote;
+
         case "highlight":
           const highlight = document.createElementNS(svgNS, "rect");
           highlight.setAttribute("x", x.toString());
@@ -362,64 +670,157 @@ export default function PDFViewer({
           highlight.setAttribute("stroke", "none");
           return highlight;
 
+        case "cloud":
+          // Create cloud shape using path with arcs
+          const cloudPath = generateCloudPath(x, y, width, height, scale);
+          const cloud = document.createElementNS(svgNS, "path");
+          cloud.setAttribute("d", cloudPath);
+          if (shouldBlink) {
+            cloud.setAttribute("stroke", "#ff0000");
+            cloud.setAttribute("stroke-width", "4");
+            cloud.setAttribute("opacity", "1");
+            cloud.style.animation = "blink 0.5s ease-in-out infinite";
+          } else {
+            cloud.setAttribute("fill", "rgba(0,204,204,0.3)");
+            cloud.setAttribute("stroke", "#00CCCC");
+            cloud.setAttribute("stroke-width", "2");
+          }
+          return cloud;
+
         case "arc":
           // Arc annotations (from my-app implementation)
           console.log("🎨 Rendering arc annotation:", annotation);
           const path = document.createElementNS(svgNS, "path");
-          if (annotation.position.points && annotation.position.points.length >= 3) {
+          if (
+            annotation.position.points &&
+            annotation.position.points.length >= 3
+          ) {
             const [startPoint, center, endPoint] = annotation.position.points;
-            console.log("🎨 Arc points:", { startPoint, center, endPoint, scale });
-            
+            console.log("🎨 Arc points:", {
+              startPoint,
+              center,
+              endPoint,
+              scale,
+            });
+
             // Scale coordinates for current zoom
             const scaledStart = {
               x: startPoint.x * scale,
-              y: startPoint.y * scale
+              y: startPoint.y * scale,
             };
             const scaledCenter = {
               x: center.x * scale,
-              y: center.y * scale
+              y: center.y * scale,
             };
             const scaledEnd = {
               x: endPoint.x * scale,
-              y: endPoint.y * scale
+              y: endPoint.y * scale,
             };
-            
+
             // Calculate radius from center to start point
             const radius = Math.sqrt(
-              Math.pow(scaledCenter.x - scaledStart.x, 2) + 
-              Math.pow(scaledCenter.y - scaledStart.y, 2)
+              Math.pow(scaledCenter.x - scaledStart.x, 2) +
+                Math.pow(scaledCenter.y - scaledStart.y, 2)
             );
-            
-            const startAngle = Math.atan2(scaledStart.y - scaledCenter.y, scaledStart.x - scaledCenter.x);
-            const endAngle = Math.atan2(scaledEnd.y - scaledCenter.y, scaledEnd.x - scaledCenter.x);
-            
+
+            const startAngle = Math.atan2(
+              scaledStart.y - scaledCenter.y,
+              scaledStart.x - scaledCenter.x
+            );
+            const endAngle = Math.atan2(
+              scaledEnd.y - scaledCenter.y,
+              scaledEnd.x - scaledCenter.x
+            );
+
             let angleDiff = endAngle - startAngle;
             while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
             while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-            
+
             const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
             const sweepFlag = angleDiff > 0 ? 1 : 0;
-            
+
             const arcPath = `M ${scaledStart.x} ${scaledStart.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${scaledEnd.x} ${scaledEnd.y}`;
             console.log("🎨 Arc path:", arcPath);
             path.setAttribute("d", arcPath);
           } else {
             // Fallback for old arc annotations
             console.log("🎨 Using fallback arc path");
-            const arcPath = `M ${x} ${y} A ${width} ${height} 0 0 1 ${x + width} ${y + height}`;
+            const arcPath = `M ${x} ${y} A ${width} ${height} 0 0 1 ${
+              x + width
+            } ${y + height}`;
             path.setAttribute("d", arcPath);
           }
-          path.setAttribute("stroke", "#0b74de");
-          path.setAttribute("stroke-width", "2");
+          if (shouldBlink) {
+            path.setAttribute("stroke", "#ff0000");
+            path.setAttribute("stroke-width", "4");
+            path.setAttribute("opacity", "1");
+            path.style.animation = "blink 0.5s ease-in-out infinite";
+          } else {
+            path.setAttribute("stroke", "#0b74de");
+            path.setAttribute("stroke-width", "2");
+          }
           path.setAttribute("fill", "none");
           console.log("🎨 Arc path element created:", path);
           return path;
+
+        case "freehand":
+          // Render freehand path
+          if (annotation.position.pathData) {
+            const freehandPath = document.createElementNS(svgNS, "path");
+            // Scale the path data points to current zoom
+            const scaledPathData = annotation.position.pathData
+              .replace(/([ML])\s+([\d.-]+)\s+([\d.-]+)/g, (match, cmd, x, y) => {
+                const scaledX = parseFloat(x) * scale;
+                const scaledY = parseFloat(y) * scale;
+                return `${cmd} ${scaledX} ${scaledY}`;
+              });
+            freehandPath.setAttribute("d", scaledPathData);
+            if (shouldBlink) {
+              freehandPath.setAttribute("stroke", "#ff0000");
+              freehandPath.setAttribute("stroke-width", "4");
+              freehandPath.setAttribute("opacity", "1");
+              freehandPath.style.animation = "blink 0.5s ease-in-out infinite";
+            } else {
+              freehandPath.setAttribute("stroke", "#000");
+              freehandPath.setAttribute("stroke-width", "2");
+            }
+            freehandPath.setAttribute("fill", "none");
+            freehandPath.setAttribute("stroke-linecap", "round");
+            freehandPath.setAttribute("stroke-linejoin", "round");
+            return freehandPath;
+          } else if (annotation.position.points && Array.isArray(annotation.position.points)) {
+            // Fallback: generate path from points
+            const points = annotation.position.points;
+            const pathData = points
+              .map((point: { x: number; y: number }, index: number) => {
+                const scaledX = point.x * scale;
+                const scaledY = point.y * scale;
+                return index === 0 ? `M ${scaledX} ${scaledY}` : `L ${scaledX} ${scaledY}`;
+              })
+              .join(" ");
+            const freehandPath = document.createElementNS(svgNS, "path");
+            freehandPath.setAttribute("d", pathData);
+            if (shouldBlink) {
+              freehandPath.setAttribute("stroke", "#ff0000");
+              freehandPath.setAttribute("stroke-width", "4");
+              freehandPath.setAttribute("opacity", "1");
+              freehandPath.style.animation = "blink 0.5s ease-in-out infinite";
+            } else {
+              freehandPath.setAttribute("stroke", "#000");
+              freehandPath.setAttribute("stroke-width", "2");
+            }
+            freehandPath.setAttribute("fill", "none");
+            freehandPath.setAttribute("stroke-linecap", "round");
+            freehandPath.setAttribute("stroke-linejoin", "round");
+            return freehandPath;
+          }
+          return null;
 
         default:
           return null;
       }
     },
-    [viewport.zoom]
+    [viewport.zoom, selectedAnnotation, isBlinking]
   );
   // Load PDF document
   const loadPDF = useCallback(async (url: string) => {
@@ -464,14 +865,15 @@ export default function PDFViewer({
 
       console.log("Calling pdfjsLib.getDocument...");
       const loadingTask = window.pdfjsLib.getDocument(pdfData, {
-        cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
+        cMapUrl:
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
         cMapPacked: true,
       });
       const pdf = await loadingTask.promise;
 
       console.log("✅ PDF document loaded successfully:", {
         numPages: pdf.numPages,
-        pdfDoc: !!pdf
+        pdfDoc: !!pdf,
       });
       setPdfDoc(pdf);
       setNumPages(pdf.numPages);
@@ -510,12 +912,19 @@ export default function PDFViewer({
     );
 
     pageAnnotations.forEach((annotation) => {
-      const element = createAnnotationElement(annotation);
+      // Use local dragged annotation if it exists and matches this annotation
+      const annotationToRender = 
+        localDraggedAnnotation && 
+        localDraggedAnnotation.id === annotation.id
+          ? localDraggedAnnotation
+          : annotation;
+      
+      const element = createAnnotationElement(annotationToRender);
       if (element) {
         svgOverlayRef.current?.appendChild(element);
       }
     });
-  }, [annotations, viewport.page, createAnnotationElement]);
+  }, [annotations, viewport.page, createAnnotationElement, localDraggedAnnotation]);
   // Render PDF page to canvas
   const renderPage = useCallback(
     async (pageNum: number) => {
@@ -705,7 +1114,7 @@ export default function PDFViewer({
       url: documentUrl?.substring(0, 50) + "...",
       hasPdfjsLib: !!window.pdfjsLib,
     });
-    
+
     if (documentUrl) {
       // Ensure pdfjsLib is available before attempting to load PDF
       if (window.pdfjsLib) {
@@ -735,6 +1144,13 @@ export default function PDFViewer({
       debouncedRenderPage(viewport.page);
     }
   }, [pdfDoc, viewport.page, debouncedRenderPage]);
+  
+  // Re-render annotations when blinking state changes
+  useEffect(() => {
+    if (isBlinking) {
+      redrawAnnotations();
+    }
+  }, [isBlinking, redrawAnnotations]);
 
   // Cleanup timeout and render operations on unmount
   useEffect(() => {
@@ -778,79 +1194,98 @@ export default function PDFViewer({
   useEffect(() => {
     if (isDrawingArc && svgOverlayRef.current) {
       // Clear existing temporary elements
-      const existingTemp = svgOverlayRef.current.querySelectorAll('.temp-arc-element');
-      existingTemp.forEach(el => svgOverlayRef.current?.removeChild(el));
+      const existingTemp =
+        svgOverlayRef.current.querySelectorAll(".temp-arc-element");
+      existingTemp.forEach((el) => svgOverlayRef.current?.removeChild(el));
 
       if (arcStartPoint) {
         const scale = viewport.zoom;
         const screenStartPoint = {
           x: arcStartPoint.x * scale,
-          y: arcStartPoint.y * scale
+          y: arcStartPoint.y * scale,
         };
 
         // Draw start point indicator (AutoCAD style - small filled circle)
-        const startCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        startCircle.setAttribute('cx', screenStartPoint.x.toString());
-        startCircle.setAttribute('cy', screenStartPoint.y.toString());
-        startCircle.setAttribute('r', '3');
-        startCircle.setAttribute('fill', '#ff0000'); // Red like AutoCAD
-        startCircle.setAttribute('stroke', '#ffffff');
-        startCircle.setAttribute('stroke-width', '1');
-        startCircle.classList.add('temp-arc-element');
+        const startCircle = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "circle"
+        );
+        startCircle.setAttribute("cx", screenStartPoint.x.toString());
+        startCircle.setAttribute("cy", screenStartPoint.y.toString());
+        startCircle.setAttribute("r", "3");
+        startCircle.setAttribute("fill", "#ff0000"); // Red like AutoCAD
+        startCircle.setAttribute("stroke", "#ffffff");
+        startCircle.setAttribute("stroke-width", "1");
+        startCircle.classList.add("temp-arc-element");
         svgOverlayRef.current.appendChild(startCircle);
 
         // Add start point label
-        const startLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        startLabel.setAttribute('x', (screenStartPoint.x + 8).toString());
-        startLabel.setAttribute('y', (screenStartPoint.y - 8).toString());
-        startLabel.setAttribute('fill', '#ff0000');
-        startLabel.setAttribute('font-size', '12');
-        startLabel.setAttribute('font-family', 'Arial, sans-serif');
-        startLabel.textContent = 'Start';
-        startLabel.classList.add('temp-arc-element');
+        const startLabel = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "text"
+        );
+        startLabel.setAttribute("x", (screenStartPoint.x + 8).toString());
+        startLabel.setAttribute("y", (screenStartPoint.y - 8).toString());
+        startLabel.setAttribute("fill", "#ff0000");
+        startLabel.setAttribute("font-size", "12");
+        startLabel.setAttribute("font-family", "Arial, sans-serif");
+        startLabel.textContent = "Start";
+        startLabel.classList.add("temp-arc-element");
         svgOverlayRef.current.appendChild(startLabel);
 
         if (arcCenter) {
           const screenCenter = {
             x: arcCenter.x * scale,
-            y: arcCenter.y * scale
+            y: arcCenter.y * scale,
           };
 
           // Draw center point indicator (AutoCAD style - crosshairs)
-          const centerCrosshair = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-          centerCrosshair.classList.add('temp-arc-element');
+          const centerCrosshair = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "g"
+          );
+          centerCrosshair.classList.add("temp-arc-element");
 
           // Horizontal crosshair line
-          const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-          hLine.setAttribute('x1', (screenCenter.x - 15).toString());
-          hLine.setAttribute('y1', screenCenter.y.toString());
-          hLine.setAttribute('x2', (screenCenter.x + 15).toString());
-          hLine.setAttribute('y2', screenCenter.y.toString());
-          hLine.setAttribute('stroke', '#00ff00'); // Green like AutoCAD
-          hLine.setAttribute('stroke-width', '1');
+          const hLine = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "line"
+          );
+          hLine.setAttribute("x1", (screenCenter.x - 15).toString());
+          hLine.setAttribute("y1", screenCenter.y.toString());
+          hLine.setAttribute("x2", (screenCenter.x + 15).toString());
+          hLine.setAttribute("y2", screenCenter.y.toString());
+          hLine.setAttribute("stroke", "#00ff00"); // Green like AutoCAD
+          hLine.setAttribute("stroke-width", "1");
 
           // Vertical crosshair line
-          const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-          vLine.setAttribute('x1', screenCenter.x.toString());
-          vLine.setAttribute('y1', (screenCenter.y - 15).toString());
-          vLine.setAttribute('x2', screenCenter.x.toString());
-          vLine.setAttribute('y2', (screenCenter.y + 15).toString());
-          vLine.setAttribute('stroke', '#00ff00');
-          vLine.setAttribute('stroke-width', '1');
+          const vLine = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "line"
+          );
+          vLine.setAttribute("x1", screenCenter.x.toString());
+          vLine.setAttribute("y1", (screenCenter.y - 15).toString());
+          vLine.setAttribute("x2", screenCenter.x.toString());
+          vLine.setAttribute("y2", (screenCenter.y + 15).toString());
+          vLine.setAttribute("stroke", "#00ff00");
+          vLine.setAttribute("stroke-width", "1");
 
           centerCrosshair.appendChild(hLine);
           centerCrosshair.appendChild(vLine);
           svgOverlayRef.current.appendChild(centerCrosshair);
 
           // Add center point label
-          const centerLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-          centerLabel.setAttribute('x', (screenCenter.x + 8).toString());
-          centerLabel.setAttribute('y', (screenCenter.y - 8).toString());
-          centerLabel.setAttribute('fill', '#00ff00');
-          centerLabel.setAttribute('font-size', '12');
-          centerLabel.setAttribute('font-family', 'Arial, sans-serif');
-          centerLabel.textContent = 'Center';
-          centerLabel.classList.add('temp-arc-element');
+          const centerLabel = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "text"
+          );
+          centerLabel.setAttribute("x", (screenCenter.x + 8).toString());
+          centerLabel.setAttribute("y", (screenCenter.y - 8).toString());
+          centerLabel.setAttribute("fill", "#00ff00");
+          centerLabel.setAttribute("font-size", "12");
+          centerLabel.setAttribute("font-family", "Arial, sans-serif");
+          centerLabel.textContent = "Center";
+          centerLabel.classList.add("temp-arc-element");
           svgOverlayRef.current.appendChild(centerLabel);
         }
       }
@@ -861,18 +1296,22 @@ export default function PDFViewer({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isDrawingArc) {
-        if (e.key === 'Escape') {
+        if (e.key === "Escape") {
           // Cancel arc drawing
           setArcStartPoint(null);
           setArcCenter(null);
           setIsDrawingArc(false);
-          setArcPhase('start');
-          
+          setArcPhase("start");
+
           // Clear temporary elements
           if (svgOverlayRef.current) {
-            const existingTemp = svgOverlayRef.current.querySelectorAll('.temp-arc-element');
-            existingTemp.forEach(el => svgOverlayRef.current?.removeChild(el));
-            const existingPreview = svgOverlayRef.current.querySelector('.temp-arc-preview');
+            const existingTemp =
+              svgOverlayRef.current.querySelectorAll(".temp-arc-element");
+            existingTemp.forEach((el) =>
+              svgOverlayRef.current?.removeChild(el)
+            );
+            const existingPreview =
+              svgOverlayRef.current.querySelector(".temp-arc-preview");
             if (existingPreview) {
               svgOverlayRef.current.removeChild(existingPreview);
             }
@@ -881,8 +1320,8 @@ export default function PDFViewer({
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isDrawingArc]);
 
   // Get pointer position at current zoom level (for temporary drawing elements)
@@ -915,6 +1354,236 @@ export default function PDFViewer({
     },
     [pdfDoc]
   );
+
+  // Find annotation at point (for select tool)
+  const findAnnotationAtPoint = useCallback(
+    (point: { x: number; y: number }): Annotation | null => {
+      const scale = viewport.zoom;
+      const pageAnnotations = annotations.filter(
+        (ann) => ann.page === viewport.page && ann.documentId === documentId
+      );
+
+      // Convert point from base scale to current zoom scale for comparison
+      const scaledPoint = {
+        x: point.x * scale,
+        y: point.y * scale,
+      };
+
+      for (const annotation of pageAnnotations) {
+        const pos = annotation.position;
+        if (!pos) continue;
+
+        switch (annotation.type) {
+          case "rectangle":
+          case "highlight":
+          case "sticky-note":
+            if (
+              pos.x !== undefined &&
+              pos.y !== undefined &&
+              pos.width !== undefined &&
+              pos.height !== undefined
+            ) {
+              const scaledX = pos.x * scale;
+              const scaledY = pos.y * scale;
+              // Use default size if width/height is 0
+              const scaledW = (pos.width && pos.width > 0) ? pos.width * scale : 100 * scale;
+              const scaledH = (pos.height && pos.height > 0) ? pos.height * scale : 80 * scale;
+              if (
+                scaledPoint.x >= scaledX &&
+                scaledPoint.x <= scaledX + scaledW &&
+                scaledPoint.y >= scaledY &&
+                scaledPoint.y <= scaledY + scaledH
+              ) {
+                return annotation;
+              }
+            }
+            break;
+
+          case "circle":
+            if (pos.x !== undefined && pos.y !== undefined && pos.width) {
+              const scaledX = pos.x * scale;
+              const scaledY = pos.y * scale;
+              const scaledR = pos.width * scale; // width is used as radius
+              const distance = Math.sqrt(
+                Math.pow(scaledPoint.x - scaledX, 2) + Math.pow(scaledPoint.y - scaledY, 2)
+              );
+              if (distance <= scaledR) {
+                return annotation;
+              }
+            }
+            break;
+
+          case "ellipse":
+            if (
+              pos.x !== undefined &&
+              pos.y !== undefined &&
+              pos.width &&
+              pos.height
+            ) {
+              const scaledX = pos.x * scale;
+              const scaledY = pos.y * scale;
+              const scaledRX = pos.width * scale; // width is used as rx
+              const scaledRY = pos.height * scale; // height is used as ry
+              // Check if point is inside ellipse using ellipse equation
+              const dx = (scaledPoint.x - scaledX) / scaledRX;
+              const dy = (scaledPoint.y - scaledY) / scaledRY;
+              const distance = dx * dx + dy * dy;
+              if (distance <= 1) {
+                return annotation;
+              }
+            }
+            break;
+
+          case "arc":
+            // Check if point is near the arc path (simplified detection)
+            if (pos.points && Array.isArray(pos.points) && pos.points.length >= 3) {
+              const [startPoint, center, endPoint] = pos.points;
+              const scaledCenter = {
+                x: center.x * scale,
+                y: center.y * scale,
+              };
+              
+              // Calculate radius
+              const radius = Math.sqrt(
+                Math.pow(center.x * scale - startPoint.x * scale, 2) +
+                Math.pow(center.y * scale - startPoint.y * scale, 2)
+              );
+              
+              // Check if point is near the arc center or on the arc path (simpler detection)
+              const distanceToCenter = Math.sqrt(
+                Math.pow(scaledPoint.x - scaledCenter.x, 2) +
+                Math.pow(scaledPoint.y - scaledCenter.y, 2)
+              );
+              
+              // Allow clicking anywhere near the arc (within radius ± 10px) for easier selection
+              if (Math.abs(distanceToCenter - radius) <= 10 * scale || distanceToCenter <= radius + 10 * scale) {
+                return annotation;
+              }
+            }
+            // Also check if arc has center/startPoint/endPoint properties separately
+            else if (pos.center) {
+              const scaledCenter = {
+                x: pos.center.x * scale,
+                y: pos.center.y * scale,
+              };
+              const distanceToCenter = Math.sqrt(
+                Math.pow(scaledPoint.x - scaledCenter.x, 2) +
+                Math.pow(scaledPoint.y - scaledCenter.y, 2)
+              );
+              // Allow clicking near the center or on the arc
+              if (distanceToCenter <= 50 * scale) {
+                return annotation;
+              }
+            }
+            break;
+
+          case "line":
+          case "measurement":
+          case "calibrate":
+          case "arrow":
+            if (
+              pos.x !== undefined &&
+              pos.y !== undefined &&
+              pos.width !== undefined &&
+              pos.height !== undefined
+            ) {
+              // Check if point is near the line
+              const x1 = pos.x * scale;
+              const y1 = pos.y * scale;
+              const x2 = pos.width * scale;
+              const y2 = pos.height * scale;
+              const distance = distanceToLine(scaledPoint, { x1, y1, x2, y2 });
+              if (distance <= 5 * scale) {
+                return annotation;
+              }
+            }
+            break;
+
+          case "cloud":
+          case "highlight":
+          case "rectangle":
+            // Check if point is inside the rectangle/cloud/highlight
+            if (
+              pos.x !== undefined &&
+              pos.y !== undefined &&
+              pos.width !== undefined &&
+              pos.height !== undefined
+            ) {
+              const rectX = pos.x * scale;
+              const rectY = pos.y * scale;
+              const rectW = pos.width * scale;
+              const rectH = pos.height * scale;
+              
+              // For cloud, check if point is within the bounding box (simplified detection)
+              if (
+                scaledPoint.x >= rectX &&
+                scaledPoint.x <= rectX + rectW &&
+                scaledPoint.y >= rectY &&
+                scaledPoint.y <= rectY + rectH
+              ) {
+                return annotation;
+              }
+            }
+            break;
+
+          case "freehand":
+            // Check if point is near the freehand path
+            if (pos.pathData || (pos.points && Array.isArray(pos.points))) {
+              const points = pos.points || [];
+              if (points.length > 0) {
+                // Check if point is near any segment of the path
+                for (let i = 0; i < points.length - 1; i++) {
+                  const p1 = { x: points[i].x * scale, y: points[i].y * scale };
+                  const p2 = { x: points[i + 1].x * scale, y: points[i + 1].y * scale };
+                  const distance = distanceToLine(scaledPoint, { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
+                  if (distance <= 5 * scale) {
+                    return annotation;
+                  }
+                }
+              }
+            }
+            break;
+        }
+      }
+      return null;
+    },
+    [annotations, viewport.page, viewport.zoom, documentId]
+  );
+
+  // Calculate distance from point to line
+  const distanceToLine = (
+    point: { x: number; y: number },
+    line: { x1: number; y1: number; x2: number; y2: number }
+  ): number => {
+    const { x1, y1, x2, y2 } = line;
+    const A = point.x - x1;
+    const B = point.y - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+
+    if (lenSq === 0) return Math.sqrt(A * A + B * B);
+
+    let param = dot / lenSq;
+
+    let xx, yy;
+    if (param < 0) {
+      xx = x1;
+      yy = y1;
+    } else if (param > 1) {
+      xx = x2;
+      yy = y2;
+    } else {
+      xx = x1 + param * C;
+      yy = y1 + param * D;
+    }
+
+    const dx = point.x - xx;
+    const dy = point.y - yy;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
 
   // Get pointer position relative to SVG element (stored at base scale for zoom independence)
   const getPointerPos = useCallback(
@@ -952,111 +1621,156 @@ export default function PDFViewer({
   );
 
   // Calculate distance between two points
-  const calculateDistance = useCallback((x1: number, y1: number, x2: number, y2: number) => {
-    return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-  }, []);
+  const calculateDistance = useCallback(
+    (x1: number, y1: number, x2: number, y2: number) => {
+      return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+    },
+    []
+  );
 
   // Calculate circle center from three points (AutoCAD method)
-  const calculateCircleCenter = useCallback((p1: { x: number; y: number }, p2: { x: number; y: number }, p3: { x: number; y: number }) => {
-    const A = p2.x - p1.x;
-    const B = p2.y - p1.y;
-    const C = p3.x - p1.x;
-    const D = p3.y - p1.y;
-    
-    const E = A * (p1.x + p2.x) + B * (p1.y + p2.y);
-    const F = C * (p1.x + p3.x) + D * (p1.y + p3.y);
-    
-    const G = 2 * (A * (p3.y - p1.y) - B * (p3.x - p1.x));
-    
-    if (Math.abs(G) < 1e-10) {
-      // Points are collinear, return null
-      return null;
-    }
-    
-    const centerX = (D * E - B * F) / G;
-    const centerY = (A * F - C * E) / G;
-    
-    return { x: centerX, y: centerY };
-  }, []);
+  const calculateCircleCenter = useCallback(
+    (
+      p1: { x: number; y: number },
+      p2: { x: number; y: number },
+      p3: { x: number; y: number }
+    ) => {
+      const A = p2.x - p1.x;
+      const B = p2.y - p1.y;
+      const C = p3.x - p1.x;
+      const D = p3.y - p1.y;
+
+      const E = A * (p1.x + p2.x) + B * (p1.y + p2.y);
+      const F = C * (p1.x + p3.x) + D * (p1.y + p3.y);
+
+      const G = 2 * (A * (p3.y - p1.y) - B * (p3.x - p1.x));
+
+      if (Math.abs(G) < 1e-10) {
+        // Points are collinear, return null
+        return null;
+      }
+
+      const centerX = (D * E - B * F) / G;
+      const centerY = (A * F - C * E) / G;
+
+      return { x: centerX, y: centerY };
+    },
+    []
+  );
 
   // Complete arc creation (from my-app implementation)
-  const completeArc = useCallback((startPoint: { x: number; y: number }, center: { x: number; y: number }, endPoint: { x: number; y: number }) => {
-    console.log("🔧 completeArc called with:", { startPoint, center, endPoint });
-    
-    if (center && startPoint && endPoint) {
-      const radius = calculateDistance(center.x, center.y, startPoint.x, startPoint.y);
+  const completeArc = useCallback(
+    (
+      startPoint: { x: number; y: number },
+      center: { x: number; y: number },
+      endPoint: { x: number; y: number }
+    ) => {
+      console.log("🔧 completeArc called with:", {
+        startPoint,
+        center,
+        endPoint,
+      });
 
-      const startAngle = Math.atan2(startPoint.y - center.y, startPoint.x - center.x);
-      const endAngle = Math.atan2(endPoint.y - center.y, endPoint.x - center.x);
+      if (center && startPoint && endPoint) {
+        const radius = calculateDistance(
+          center.x,
+          center.y,
+          startPoint.x,
+          startPoint.y
+        );
 
-      let angleDiff = endAngle - startAngle;
+        const startAngle = Math.atan2(
+          startPoint.y - center.y,
+          startPoint.x - center.x
+        );
+        const endAngle = Math.atan2(
+          endPoint.y - center.y,
+          endPoint.x - center.x
+        );
 
-      while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-      while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+        let angleDiff = endAngle - startAngle;
 
-      const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
-      const sweepFlag = angleDiff > 0 ? 1 : 0;
+        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
 
-      const pathData = `M ${startPoint.x} ${startPoint.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${endPoint.x} ${endPoint.y}`;
+        const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
+        const sweepFlag = angleDiff > 0 ? 1 : 0;
 
-      const arcLength = Math.abs(angleDiff) * radius;
+        const pathData = `M ${startPoint.x} ${startPoint.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${endPoint.x} ${endPoint.y}`;
 
-      const newAnnotation: Omit<Annotation, "id" | "createdAt" | "updatedAt"> = {
-        documentId: documentId,
-        type: "arc",
-        page: viewport.page,
-        position: { 
-          x: startPoint.x, 
-          y: startPoint.y, 
-          width: radius, 
-          height: radius,
-          points: [
-            { x: startPoint.x, y: startPoint.y },
-            { x: center.x, y: center.y },
-            { x: endPoint.x, y: endPoint.y }
-          ]
-        },
-        style: {
-          color: "#0b74de",
-          opacity: 1,
-          strokeWidth: 2,
-          strokeColor: "#0b74de",
-        },
-        author: currentUser,
-        isVisible: true,
-        metrics: {
-          length: arcLength,
-          length_px: arcLength,
-          radius: radius,
-        }
-      };
-      
+        const arcLength = Math.abs(angleDiff) * radius;
+
+        const newAnnotation: Omit<
+          Annotation,
+          "id" | "createdAt" | "updatedAt"
+        > = {
+          documentId: documentId,
+          type: "arc",
+          page: viewport.page,
+          position: {
+            x: startPoint.x,
+            y: startPoint.y,
+            width: radius,
+            height: radius,
+            points: [
+              { x: startPoint.x, y: startPoint.y },
+              { x: center.x, y: center.y },
+              { x: endPoint.x, y: endPoint.y },
+            ],
+          },
+          style: {
+            color: "#0b74de",
+            opacity: 1,
+            strokeWidth: 2,
+            strokeColor: "#0b74de",
+          },
+          author: currentUser,
+          isVisible: true,
+          metrics: {
+            length: arcLength,
+            length_px: arcLength,
+            radius: radius,
+          },
+        };
+
         console.log("🔧 About to create annotation:", newAnnotation);
         onAnnotationCreate(newAnnotation);
-        console.log("✅ Arc completed successfully! Annotation should be visible now.");
-    }
-
-    // Clear any existing calculation elements
-    if (svgOverlayRef.current) {
-      const existingCalc = svgOverlayRef.current.querySelector('.real-time-calculation');
-      if (existingCalc) {
-        svgOverlayRef.current.removeChild(existingCalc);
+        console.log(
+          "✅ Arc completed successfully! Annotation should be visible now."
+        );
       }
-    }
 
-    // Reset arc drawing state
-    setArcStartPoint(null);
-    setArcCenter(null);
-    setIsDrawingArc(false);
-    setArcPhase('start');
-  }, [calculateDistance, documentId, viewport.page, currentUser, onAnnotationCreate]);
+      // Clear any existing calculation elements
+      if (svgOverlayRef.current) {
+        const existingCalc = svgOverlayRef.current.querySelector(
+          ".real-time-calculation"
+        );
+        if (existingCalc) {
+          svgOverlayRef.current.removeChild(existingCalc);
+        }
+      }
+
+      // Reset arc drawing state
+      setArcStartPoint(null);
+      setArcCenter(null);
+      setIsDrawingArc(false);
+      setArcPhase("start");
+    },
+    [
+      calculateDistance,
+      documentId,
+      viewport.page,
+      currentUser,
+      onAnnotationCreate,
+    ]
+  );
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent, pageNumber: number) => {
       // Check for panning: spacebar + mouse or middle mouse button
       const isMiddleMouse = e.button === 1;
       const shouldPan = isSpacePressed || isMiddleMouse;
-      
+
       if (shouldPan) {
         e.preventDefault();
         setIsPanning(true);
@@ -1065,13 +1779,62 @@ export default function PDFViewer({
           const rect = container.getBoundingClientRect();
           setPanStart({
             x: e.clientX - rect.left + container.scrollLeft,
-            y: e.clientY - rect.top + container.scrollTop
+            y: e.clientY - rect.top + container.scrollTop,
           });
         }
         return;
       }
 
       console.log("Mouse down event triggered, activeTool:", activeTool);
+
+      // Handle erase tool
+      if (activeTool === "erase") {
+        const p = getPointerPos(e);
+        const clickedAnnotation = findAnnotationAtPoint(p);
+        if (clickedAnnotation && onAnnotationDelete) {
+          console.log("Erasing annotation:", clickedAnnotation.id);
+          onAnnotationDelete(clickedAnnotation.id);
+          setIsPointerDown(false);
+          return;
+        } else {
+          setIsPointerDown(false);
+          return;
+        }
+      }
+
+      // Handle select tool (activeTool is null)
+      if (activeTool === null) {
+        const p = getPointerPos(e);
+        const currentP = getCurrentZoomPointerPos(e);
+        const clickedAnnotation = findAnnotationAtPoint(p);
+        if (clickedAnnotation) {
+          setSelectedAnnotation(clickedAnnotation);
+          setIsDragging(true);
+          setDragStart(p);
+          dragStartCurrentRef.current = currentP;
+          // Store original position for dragging
+          setOriginalAnnotationPos({
+            x: clickedAnnotation.position.x || 0,
+            y: clickedAnnotation.position.y || 0,
+            width: clickedAnnotation.position.width,
+            height: clickedAnnotation.position.height,
+          });
+          // Store original arc points if it's an arc
+          if (clickedAnnotation.type === "arc" && clickedAnnotation.position.points) {
+            originalArcPointsRef.current = [...clickedAnnotation.position.points];
+          } else {
+            originalArcPointsRef.current = null;
+          }
+          // Initialize local dragged annotation (for visual feedback)
+          setLocalDraggedAnnotation(clickedAnnotation);
+          setIsPointerDown(false);
+          return;
+        } else {
+          setSelectedAnnotation(null);
+          setIsPointerDown(false);
+          return;
+        }
+      }
 
       if (!activeTool || !containerRef.current || !svgOverlayRef.current) {
         console.log(
@@ -1087,24 +1850,23 @@ export default function PDFViewer({
 
       // Check if PDF is loaded
       if (!pdfDoc) {
-        console.warn(
-          "❌ PDF not loaded yet - pdfDoc is null",
-          {
-            documentUrl: documentUrl?.substring(0, 50),
-            isLoading,
-            hasPdfjsLib: !!window.pdfjsLib,
-            numPages
-          }
-        );
+        console.warn("❌ PDF not loaded yet - pdfDoc is null", {
+          documentUrl: documentUrl?.substring(0, 50),
+          isLoading,
+          hasPdfjsLib: !!window.pdfjsLib,
+          numPages,
+        });
         // Don't show alert on every click, just log
-        console.log("Please wait for the PDF to finish loading before drawing.");
+        console.log(
+          "Please wait for the PDF to finish loading before drawing."
+        );
         return;
       }
-      
+
       console.log("✅ PDF is loaded, allowing drawing", {
         pdfDoc: !!pdfDoc,
         numPages,
-        activeTool
+        activeTool,
       });
 
       // Ensure SVG overlay is properly sized before allowing drawing
@@ -1157,33 +1919,77 @@ export default function PDFViewer({
           }
           return;
 
+        case "sticky-note":
+          // Handle sticky note tool - drag to create box first
+          setIsCreating(true);
+          setDragStart(p);
+          const stickyNoteElement = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "rect"
+          );
+          stickyNoteElement.setAttribute("x", currentP.x.toString());
+          stickyNoteElement.setAttribute("y", currentP.y.toString());
+          stickyNoteElement.setAttribute("width", "0");
+          stickyNoteElement.setAttribute("height", "0");
+          stickyNoteElement.setAttribute("fill", "#FFA500");
+          stickyNoteElement.setAttribute("stroke", "#000");
+          stickyNoteElement.setAttribute("stroke-width", "1");
+          stickyNoteElement.setAttribute("opacity", "0.9");
+          svgOverlayRef.current.appendChild(stickyNoteElement);
+          (
+            svgOverlayRef.current as SVGSVGElement & {
+              currentDrawingElement?: SVGElement;
+            }
+          ).currentDrawingElement = stickyNoteElement;
+          return;
+
         case "arc":
           // AutoCAD-style arc drawing: Start point, Center, End point
-          console.log("🎯 Arc tool clicked! Current state:", { isDrawingArc, arcPhase, arcStartPoint, arcCenter });
-          
+          console.log("🎯 Arc tool clicked! Current state:", {
+            isDrawingArc,
+            arcPhase,
+            arcStartPoint,
+            arcCenter,
+          });
+
           if (!isDrawingArc) {
             // Phase 1: Set start point (like AutoCAD: "Specify start point of arc")
             setArcStartPoint(p);
-            setArcPhase('center');
+            setArcPhase("center");
             setIsDrawingArc(true);
             setIsPointerDown(false);
-            console.log("✅ Arc: Start point set at", p, "- Next: Specify center point");
+            console.log(
+              "✅ Arc: Start point set at",
+              p,
+              "- Next: Specify center point"
+            );
             return;
-          } else if (arcPhase === 'center') {
+          } else if (arcPhase === "center") {
             // Phase 2: Set center point (like AutoCAD: "Specify center point of arc")
             setArcCenter(p);
-            setArcPhase('end');
+            setArcPhase("end");
             setIsPointerDown(false);
-            console.log("✅ Arc: Center point set at", p, "- Next: Specify end point");
+            console.log(
+              "✅ Arc: Center point set at",
+              p,
+              "- Next: Specify end point"
+            );
             return;
-          } else if (arcPhase === 'end') {
+          } else if (arcPhase === "end") {
             // Phase 3: Complete the arc with end point (like AutoCAD: "Specify end point of arc")
-            console.log("🎯 Completing arc with points:", { start: arcStartPoint, center: arcCenter, end: p });
+            console.log("🎯 Completing arc with points:", {
+              start: arcStartPoint,
+              center: arcCenter,
+              end: p,
+            });
             if (arcStartPoint && arcCenter) {
               completeArc(arcStartPoint, arcCenter, p);
               console.log("✅ Arc completed successfully!");
             } else {
-              console.error("❌ Missing arc points:", { arcStartPoint, arcCenter });
+              console.error("❌ Missing arc points:", {
+                arcStartPoint,
+                arcCenter,
+              });
             }
             setIsPointerDown(false);
             return;
@@ -1280,6 +2086,7 @@ export default function PDFViewer({
         case "line":
         case "measurement":
         case "calibrate":
+        case "arrow":
           setIsCreating(true);
           setDragStart(p);
           const lineElement = document.createElementNS(
@@ -1295,6 +2102,8 @@ export default function PDFViewer({
               ? "#ff6b00"
               : activeTool === "calibrate"
               ? "red"
+              : activeTool === "arrow"
+              ? "#000"
               : "#000";
           lineElement.setAttribute("stroke", strokeColor);
           lineElement.setAttribute("stroke-width", "2");
@@ -1304,6 +2113,50 @@ export default function PDFViewer({
               currentDrawingElement?: SVGElement;
             }
           ).currentDrawingElement = lineElement;
+          return;
+
+        case "cloud":
+          // Handle cloud tool - drag to create cloud shape
+          setIsCreating(true);
+          setDragStart(p);
+          const cloudElement = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "path"
+          );
+          cloudElement.setAttribute("d", `M ${currentP.x} ${currentP.y}`);
+          cloudElement.setAttribute("fill", "rgba(0,204,204,0.3)");
+          cloudElement.setAttribute("stroke", "#00CCCC");
+          cloudElement.setAttribute("stroke-width", "2");
+          svgOverlayRef.current.appendChild(cloudElement);
+          (
+            svgOverlayRef.current as SVGSVGElement & {
+              currentDrawingElement?: SVGElement;
+            }
+          ).currentDrawingElement = cloudElement;
+          return;
+
+        case "freehand":
+          // Start freehand drawing
+          setIsDrawingFreehand(true);
+          setIsCreating(true);
+          setDragStart(p); // Set dragStart so handleMouseMove works
+          setFreehandPoints([p]); // Start with first point (base scale)
+          const freehandPath = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "path"
+          );
+          freehandPath.setAttribute("d", `M ${currentP.x} ${currentP.y}`);
+          freehandPath.setAttribute("fill", "none");
+          freehandPath.setAttribute("stroke", "#000");
+          freehandPath.setAttribute("stroke-width", "2");
+          freehandPath.setAttribute("stroke-linecap", "round");
+          freehandPath.setAttribute("stroke-linejoin", "round");
+          svgOverlayRef.current.appendChild(freehandPath);
+          (
+            svgOverlayRef.current as SVGSVGElement & {
+              currentDrawingElement?: SVGElement;
+            }
+          ).currentDrawingElement = freehandPath;
           return;
 
         default:
@@ -1324,79 +2177,252 @@ export default function PDFViewer({
       arcPhase,
       arcStartPoint,
       arcCenter,
+      findAnnotationAtPoint,
+      onAnnotationDelete,
     ]
   );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
+      // Handle dragging annotations (select tool)
+      if (isDragging && selectedAnnotation && dragStartCurrentRef.current && originalAnnotationPos) {
+        e.preventDefault();
+        const currentP = getCurrentZoomPointerPos(e);
+        const scale = viewport.zoom;
+        
+        // Calculate delta in screen coordinates (incremental from last position, like my-app)
+        const screenDeltaX = currentP.x - dragStartCurrentRef.current.x;
+        const screenDeltaY = currentP.y - dragStartCurrentRef.current.y;
+        
+        // Convert screen delta to base scale delta (like my-app: baseDelta = screenDelta * (baseScale / scale))
+        // baseScale is 1.0, so: baseDelta = screenDelta / scale
+        const baseDeltaX = screenDeltaX / scale;
+        const baseDeltaY = screenDeltaY / scale;
+
+        // Calculate new position based on original position + accumulated delta
+        const newX = originalAnnotationPos.x + baseDeltaX;
+        const newY = originalAnnotationPos.y + baseDeltaY;
+        const newWidth = (originalAnnotationPos.width || 0) + baseDeltaX;
+        const newHeight = (originalAnnotationPos.height || 0) + baseDeltaY;
+
+        // Update annotation position (LOCAL STATE ONLY - NO API CALL)
+        let updatedAnnotation: Annotation = {
+          ...selectedAnnotation,
+          position: {
+            ...selectedAnnotation.position,
+          },
+        };
+
+        // Handle different annotation types
+        if (
+          selectedAnnotation.type === "line" ||
+          selectedAnnotation.type === "measurement" ||
+          selectedAnnotation.type === "calibrate" ||
+          selectedAnnotation.type === "arrow"
+        ) {
+          // For lines and arrows, update both start and end points
+          updatedAnnotation.position.x = newX;
+          updatedAnnotation.position.y = newY;
+          updatedAnnotation.position.width = newWidth;
+          updatedAnnotation.position.height = newHeight;
+        } else if (
+          selectedAnnotation.type === "circle" ||
+          selectedAnnotation.type === "ellipse"
+        ) {
+          // For circles and ellipses, move center only, keep size the same
+          updatedAnnotation.position.x = newX;
+          updatedAnnotation.position.y = newY;
+          // Keep width and height unchanged (size stays the same)
+        } else if (
+          selectedAnnotation.type === "cloud" ||
+          selectedAnnotation.type === "highlight" ||
+          selectedAnnotation.type === "rectangle" ||
+          selectedAnnotation.type === "sticky-note"
+        ) {
+          // For rectangles, clouds, highlights, and sticky notes, move position
+          updatedAnnotation.position.x = newX;
+          updatedAnnotation.position.y = newY;
+          // Keep width and height unchanged (size stays the same)
+        } else if (selectedAnnotation.type === "arc") {
+          // For arcs, move all points (startPoint, center, endPoint) by the same delta
+          // Use original points stored when dragging started
+          if (originalArcPointsRef.current && originalArcPointsRef.current.length >= 3) {
+            const [originalStart, originalCenter, originalEnd] = originalArcPointsRef.current;
+            
+            // Move all points by the delta
+            updatedAnnotation.position.points = [
+              { x: originalStart.x + baseDeltaX, y: originalStart.y + baseDeltaY },
+              { x: originalCenter.x + baseDeltaX, y: originalCenter.y + baseDeltaY },
+              { x: originalEnd.x + baseDeltaX, y: originalEnd.y + baseDeltaY },
+            ];
+          } else if (selectedAnnotation.position.points && Array.isArray(selectedAnnotation.position.points)) {
+            // Fallback: use current points if original not stored
+            updatedAnnotation.position.points = selectedAnnotation.position.points.map((point: { x: number; y: number }) => ({
+              x: point.x + baseDeltaX,
+              y: point.y + baseDeltaY,
+            }));
+          }
+          // Also update center, startPoint, endPoint if they exist separately
+          if (selectedAnnotation.position.center) {
+            const originalCenter = selectedAnnotation.position.center;
+            updatedAnnotation.position.center = {
+              x: originalCenter.x + baseDeltaX,
+              y: originalCenter.y + baseDeltaY,
+            };
+          }
+          if (selectedAnnotation.position.startPoint) {
+            const originalStart = selectedAnnotation.position.startPoint;
+            updatedAnnotation.position.startPoint = {
+              x: originalStart.x + baseDeltaX,
+              y: originalStart.y + baseDeltaY,
+            };
+          }
+          if (selectedAnnotation.position.endPoint) {
+            const originalEnd = selectedAnnotation.position.endPoint;
+            updatedAnnotation.position.endPoint = {
+              x: originalEnd.x + baseDeltaX,
+              y: originalEnd.y + baseDeltaY,
+            };
+          }
+        } else {
+          // For other types (rectangle, highlight, text, etc.), move position
+          updatedAnnotation.position.x = newX;
+          updatedAnnotation.position.y = newY;
+        }
+
+        // Update local state only (NO API CALL during dragging for performance)
+        setLocalDraggedAnnotation(updatedAnnotation);
+        
+        // Update drag start for next incremental update (like my-app line 882: setDragStart(pos))
+        dragStartCurrentRef.current = currentP;
+        // Update original position for next frame to accumulate deltas
+        setOriginalAnnotationPos({
+          x: newX,
+          y: newY,
+          width: newWidth,
+          height: newHeight,
+        });
+        return;
+      }
+
       // Handle panning
       if (isPanning && panStart && containerRef.current) {
         const container = containerRef.current;
         const rect = container.getBoundingClientRect();
         const currentX = e.clientX - rect.left + container.scrollLeft;
         const currentY = e.clientY - rect.top + container.scrollTop;
-        
+
         const deltaX = currentX - panStart.x;
         const deltaY = currentY - panStart.y;
-        
-        setPanOffset(prev => ({
+
+        setPanOffset((prev) => ({
           x: prev.x + deltaX,
-          y: prev.y + deltaY
+          y: prev.y + deltaY,
         }));
-        
+
         setPanStart({
           x: currentX,
-          y: currentY
+          y: currentY,
         });
         return;
       }
 
       // Handle arc preview drawing (from my-app implementation)
-      if (isDrawingArc && arcPhase === 'end' && arcCenter && arcStartPoint && svgOverlayRef.current) {
+      if (
+        isDrawingArc &&
+        arcPhase === "end" &&
+        arcCenter &&
+        arcStartPoint &&
+        svgOverlayRef.current
+      ) {
         const currentP = getCurrentZoomPointerPos(e);
-        
+
         // Remove existing preview
-        const existingPreview = svgOverlayRef.current.querySelector('.temp-arc-preview');
+        const existingPreview =
+          svgOverlayRef.current.querySelector(".temp-arc-preview");
         if (existingPreview) {
           svgOverlayRef.current.removeChild(existingPreview);
         }
-        
+
         // Create new preview arc using center-based approach
         const scale = viewport.zoom;
         const screenStartPoint = {
           x: arcStartPoint.x * scale,
-          y: arcStartPoint.y * scale
+          y: arcStartPoint.y * scale,
         };
         const screenCenter = {
           x: arcCenter.x * scale,
-          y: arcCenter.y * scale
+          y: arcCenter.y * scale,
         };
-        
-        const radius = calculateDistance(screenCenter.x, screenCenter.y, screenStartPoint.x, screenStartPoint.y);
-        const startAngle = Math.atan2(screenStartPoint.y - screenCenter.y, screenStartPoint.x - screenCenter.x);
-        const endAngle = Math.atan2(currentP.y - screenCenter.y, currentP.x - screenCenter.x);
-        
+
+        const radius = calculateDistance(
+          screenCenter.x,
+          screenCenter.y,
+          screenStartPoint.x,
+          screenStartPoint.y
+        );
+        const startAngle = Math.atan2(
+          screenStartPoint.y - screenCenter.y,
+          screenStartPoint.x - screenCenter.x
+        );
+        const endAngle = Math.atan2(
+          currentP.y - screenCenter.y,
+          currentP.x - screenCenter.x
+        );
+
         let angleDiff = endAngle - startAngle;
         while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
         while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-        
+
         const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
         const sweepFlag = angleDiff > 0 ? 1 : 0;
-        
+
         const arcPath = `M ${screenStartPoint.x} ${screenStartPoint.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${currentP.x} ${currentP.y}`;
-        
-        const previewPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        previewPath.setAttribute('d', arcPath);
-        previewPath.setAttribute('stroke', '#ffff00'); // Yellow like AutoCAD preview
-        previewPath.setAttribute('stroke-width', '2');
-        previewPath.setAttribute('fill', 'none');
-        previewPath.setAttribute('stroke-dasharray', '8,4'); // More AutoCAD-like dash pattern
-        previewPath.classList.add('temp-arc-preview');
-        
+
+        const previewPath = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "path"
+        );
+        previewPath.setAttribute("d", arcPath);
+        previewPath.setAttribute("stroke", "#ffff00"); // Yellow like AutoCAD preview
+        previewPath.setAttribute("stroke-width", "2");
+        previewPath.setAttribute("fill", "none");
+        previewPath.setAttribute("stroke-dasharray", "8,4"); // More AutoCAD-like dash pattern
+        previewPath.classList.add("temp-arc-preview");
+
         svgOverlayRef.current.appendChild(previewPath);
         return;
       }
 
+      // Handle freehand separately (doesn't need dragStart)
+      if (activeTool === "freehand" && isDrawingFreehand && svgOverlayRef.current) {
+        const currentElement = (
+          svgOverlayRef.current as SVGSVGElement & {
+            currentDrawingElement?: SVGElement;
+          }
+        ).currentDrawingElement;
+        
+        if (currentElement) {
+          const p = getPointerPos(e); // Base scale coordinates
+          setFreehandPoints((prev) => {
+            const newPoints = [...prev, p];
+            // Update path element with current zoom coordinates
+            const currentP = getCurrentZoomPointerPos(e);
+            const pathData = newPoints
+              .map((point, index) => {
+                const scaledX = point.x * viewport.zoom;
+                const scaledY = point.y * viewport.zoom;
+                return index === 0 ? `M ${scaledX} ${scaledY}` : `L ${scaledX} ${scaledY}`;
+              })
+              .join(" ");
+            currentElement.setAttribute("d", pathData);
+            return newPoints;
+          });
+        }
+        return;
+      }
+
+      // For other tools, check normal conditions
       if (!isCreating || !dragStart || !activeTool || !svgOverlayRef.current) {
         return;
       }
@@ -1424,21 +2450,38 @@ export default function PDFViewer({
       switch (activeTool) {
         case "highlight":
         case "rectangle":
-          const startCurrentX = dragStart.x * viewport.zoom; // Convert stored base scale to current zoom
-          const startCurrentY = dragStart.y * viewport.zoom;
+        case "sticky-note":
+        case "cloud":
+          const startCurrentX = dragStart!.x * viewport.zoom; // Convert stored base scale to current zoom
+          const startCurrentY = dragStart!.y * viewport.zoom;
           const x = Math.min(currentP.x, startCurrentX);
           const y = Math.min(currentP.y, startCurrentY);
           const width = Math.abs(currentP.x - startCurrentX);
           const height = Math.abs(currentP.y - startCurrentY);
-          currentElement.setAttribute("x", x.toString());
-          currentElement.setAttribute("y", y.toString());
-          currentElement.setAttribute("width", width.toString());
-          currentElement.setAttribute("height", height.toString());
+          
+          if (activeTool === "cloud") {
+            // For cloud, update path
+            const cloudPath = generateCloudPath(x, y, width, height, viewport.zoom);
+            currentElement.setAttribute("d", cloudPath);
+          } else {
+            // For rectangle/highlight/sticky-note, update rect attributes
+            currentElement.setAttribute("x", x.toString());
+            currentElement.setAttribute("y", y.toString());
+            currentElement.setAttribute("width", width.toString());
+            currentElement.setAttribute("height", height.toString());
+            // Update fill color for sticky note
+            if (activeTool === "sticky-note") {
+              currentElement.setAttribute("fill", "#FFA500");
+              currentElement.setAttribute("stroke", "#000");
+              currentElement.setAttribute("stroke-width", "1");
+              currentElement.setAttribute("opacity", "0.9");
+            }
+          }
           break;
 
         case "circle":
-          const startCurrentCircleX = dragStart.x * viewport.zoom;
-          const startCurrentCircleY = dragStart.y * viewport.zoom;
+          const startCurrentCircleX = dragStart!.x * viewport.zoom;
+          const startCurrentCircleY = dragStart!.y * viewport.zoom;
           const radius = Math.sqrt(
             Math.pow(currentP.x - startCurrentCircleX, 2) +
               Math.pow(currentP.y - startCurrentCircleY, 2)
@@ -1447,8 +2490,8 @@ export default function PDFViewer({
           break;
 
         case "ellipse":
-          const startCurrentEllipseX = dragStart.x * viewport.zoom;
-          const startCurrentEllipseY = dragStart.y * viewport.zoom;
+          const startCurrentEllipseX = dragStart!.x * viewport.zoom;
+          const startCurrentEllipseY = dragStart!.y * viewport.zoom;
           currentElement.setAttribute(
             "rx",
             Math.abs(currentP.x - startCurrentEllipseX).toString()
@@ -1462,6 +2505,7 @@ export default function PDFViewer({
         case "line":
         case "measurement":
         case "calibrate":
+        case "arrow":
           currentElement.setAttribute("x2", currentP.x.toString());
           currentElement.setAttribute("y2", currentP.y.toString());
           break;
@@ -1482,12 +2526,37 @@ export default function PDFViewer({
       calculateDistance,
       isPanning,
       panStart,
+      isDragging,
+      selectedAnnotation,
+      dragStart,
+      originalAnnotationPos,
+      onAnnotationUpdate,
+      getPointerPos,
+      generateCloudPath, // Added dependency for cloud rendering
     ]
   );
 
   const handleMouseUp = useCallback(
     (e: React.MouseEvent, pageNumber: number) => {
       console.log("Mouse up event triggered");
+
+      // Handle dragging end (select tool)
+      if (isDragging && selectedAnnotation) {
+        // Call API update only when dragging ends
+        if (localDraggedAnnotation) {
+          onAnnotationUpdate(localDraggedAnnotation);
+        }
+        
+        setIsDragging(false);
+        setDragStart(null);
+        setOriginalAnnotationPos(null);
+        dragStartCurrentRef.current = null;
+        isDraggingRef.current = false;
+        originalArcPointsRef.current = null; // Clear original arc points
+        setLocalDraggedAnnotation(null); // Clear local state
+        setIsPointerDown(false);
+        return;
+      }
 
       // Handle panning end
       if (isPanning) {
@@ -1503,7 +2572,13 @@ export default function PDFViewer({
         return;
       }
 
-      if (!isCreating || !dragStart || !activeTool || !svgOverlayRef.current || !isPointerDown) {
+      if (
+        !isCreating ||
+        !dragStart ||
+        !activeTool ||
+        !svgOverlayRef.current ||
+        !isPointerDown
+      ) {
         console.log(
           "Mouse up blocked - isCreating:",
           isCreating,
@@ -1537,28 +2612,42 @@ export default function PDFViewer({
         return;
       }
 
-      const startX = dragStart.x;
-      const startY = dragStart.y;
-
       // If movement is too small, treat this as a click and DO NOT create an annotation
-      const minMove = 5; // pixels
-      const deltaX = Math.abs(p.x - startX);
-      const deltaY = Math.abs(p.y - startY);
-      if (deltaX < minMove && deltaY < minMove) {
-        console.log("Mouse movement too small, skipping annotation creation");
-        if (currentElement && svgOverlayRef.current) {
-          svgOverlayRef.current.removeChild(currentElement);
-          (
-            svgOverlayRef.current as SVGSVGElement & {
-              currentDrawingElement?: SVGElement;
-            }
-          ).currentDrawingElement = undefined;
+      // Skip this check for freehand since it needs to track all movements
+      if (activeTool !== "freehand") {
+        if (!dragStart) {
+          setIsCreating(false);
+          setIsPointerDown(false);
+          return;
         }
-        setIsCreating(false);
-        setDragStart(null);
-        setIsPointerDown(false);
-        return;
+        const startX = dragStart.x;
+        const startY = dragStart.y;
+        const minMove = 5; // pixels
+        const deltaX = Math.abs(p.x - startX);
+        const deltaY = Math.abs(p.y - startY);
+        if (deltaX < minMove && deltaY < minMove) {
+          console.log("Mouse movement too small, skipping annotation creation");
+          if (currentElement && svgOverlayRef.current) {
+            // Check if element is actually a child before removing
+            if (currentElement.parentNode === svgOverlayRef.current) {
+              svgOverlayRef.current.removeChild(currentElement);
+            }
+            (
+              svgOverlayRef.current as SVGSVGElement & {
+                currentDrawingElement?: SVGElement;
+              }
+            ).currentDrawingElement = undefined;
+          }
+          setIsCreating(false);
+          setDragStart(null);
+          setIsPointerDown(false);
+          return;
+        }
       }
+      
+      // Get startX and startY for non-freehand tools
+      const startX = dragStart?.x ?? 0;
+      const startY = dragStart?.y ?? 0;
 
       let newAnnotation: Omit<
         Annotation,
@@ -1602,6 +2691,119 @@ export default function PDFViewer({
             author: currentUser,
             isVisible: true,
           };
+          break;
+
+        case "cloud":
+          const cloudX = Math.min(p.x, startX);
+          const cloudY = Math.min(p.y, startY);
+          const cloudW = Math.abs(p.x - startX);
+          const cloudH = Math.abs(p.y - startY);
+          newAnnotation = {
+            documentId: documentId,
+            type: "cloud",
+            page: pageNumber,
+            position: { x: cloudX, y: cloudY, width: cloudW, height: cloudH },
+            style: {
+              color: "#00CCCC",
+              opacity: 0.3,
+              strokeWidth: 2,
+              strokeColor: "#00CCCC",
+            },
+            author: currentUser,
+            isVisible: true,
+          };
+          break;
+
+        case "freehand":
+          // Complete freehand drawing
+          console.log("Freehand mouse up - points:", freehandPoints.length);
+          if (freehandPoints.length > 1) {
+            // Create path data from points (base scale)
+            const pathData = freehandPoints
+              .map((point, index) => {
+                return index === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`;
+              })
+              .join(" ");
+            
+            // Calculate bounding box
+            const minX = Math.min(...freehandPoints.map((p) => p.x));
+            const minY = Math.min(...freehandPoints.map((p) => p.y));
+            const maxX = Math.max(...freehandPoints.map((p) => p.x));
+            const maxY = Math.max(...freehandPoints.map((p) => p.y));
+            
+            newAnnotation = {
+              documentId: documentId,
+              type: "freehand",
+              page: pageNumber,
+              position: {
+                x: minX,
+                y: minY,
+                width: maxX - minX,
+                height: maxY - minY,
+                pathData: pathData,
+                points: freehandPoints,
+              },
+              style: {
+                color: "#000",
+                opacity: 1,
+                strokeWidth: 2,
+                strokeColor: "#000",
+              },
+              author: currentUser,
+              isVisible: true,
+            };
+            console.log("Freehand annotation created:", newAnnotation);
+          } else {
+            // If no points or only one point, don't create annotation
+            console.log("Freehand drawing too short, skipping annotation creation");
+            if (currentElement && svgOverlayRef.current) {
+              // Check if element is actually a child before removing
+              if (currentElement.parentNode === svgOverlayRef.current) {
+                svgOverlayRef.current.removeChild(currentElement);
+              }
+            }
+            setIsDrawingFreehand(false);
+            setFreehandPoints([]);
+            setIsCreating(false);
+            setDragStart(null);
+            setIsPointerDown(false);
+            return;
+          }
+          setIsDrawingFreehand(false);
+          setFreehandPoints([]);
+          break;
+
+        case "sticky-note":
+          const sX = Math.min(p.x, startX);
+          const sY = Math.min(p.y, startY);
+          const sW = Math.abs(p.x - startX);
+          const sH = Math.abs(p.y - startY);
+          // Show prompt for sticky note text after box is created
+          const stickyNoteContent = prompt("Enter sticky note text:");
+          if (stickyNoteContent) {
+            newAnnotation = {
+              documentId: documentId,
+              type: "sticky-note",
+              page: pageNumber,
+              position: { x: sX, y: sY, width: sW, height: sH },
+              content: stickyNoteContent,
+              style: { color: "#FFA500", opacity: 0.9, fontSize: 12 },
+              author: currentUser,
+              isVisible: true,
+            };
+          } else {
+            // User cancelled, don't create annotation
+            if (currentElement && svgOverlayRef.current) {
+              // Check if element is actually a child before removing
+              if (currentElement.parentNode === svgOverlayRef.current) {
+                svgOverlayRef.current.removeChild(currentElement);
+              }
+            }
+            setIsCreating(false);
+            setDragStart(null);
+            setIsPointerDown(false);
+            return;
+          }
           break;
 
         case "circle":
@@ -1664,6 +2866,23 @@ export default function PDFViewer({
           };
           break;
 
+        case "arrow":
+          newAnnotation = {
+            documentId: documentId,
+            type: "arrow",
+            page: pageNumber,
+            position: { x: startX, y: startY, width: p.x, height: p.y }, // Using width/height as x2/y2
+            style: {
+              color: "#000",
+              opacity: 1,
+              strokeWidth: 2,
+              strokeColor: "#000",
+            },
+            author: currentUser,
+            isVisible: true,
+          };
+          break;
+
         case "measurement":
           newAnnotation = {
             documentId: documentId,
@@ -1707,7 +2926,10 @@ export default function PDFViewer({
 
       // Remove temporary element after annotation is created
       if (currentElement && svgOverlayRef.current) {
-        svgOverlayRef.current.removeChild(currentElement);
+        // Check if element is actually a child before removing
+        if (currentElement.parentNode === svgOverlayRef.current) {
+          svgOverlayRef.current.removeChild(currentElement);
+        }
         (
           svgOverlayRef.current as SVGSVGElement & {
             currentDrawingElement?: SVGElement;
@@ -1717,6 +2939,7 @@ export default function PDFViewer({
 
       setIsCreating(false);
       setDragStart(null);
+      setIsPointerDown(false);
     },
     [
       isCreating,
@@ -1728,6 +2951,11 @@ export default function PDFViewer({
       onAnnotationCreate,
       isDrawingArc,
       isPointerDown,
+      isDragging,
+      selectedAnnotation,
+      originalAnnotationPos,
+      freehandPoints,
+      isDrawingFreehand,
     ]
   );
 
@@ -1754,14 +2982,14 @@ export default function PDFViewer({
   // Keyboard event listeners for spacebar panning
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isPanning) {
+      if (e.code === "Space" && !isPanning) {
         e.preventDefault();
         setIsSpacePressed(true);
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
+      if (e.code === "Space") {
         e.preventDefault();
         setIsSpacePressed(false);
         if (isPanning) {
@@ -1771,12 +2999,12 @@ export default function PDFViewer({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
     };
   }, [isPanning]);
 
@@ -1785,7 +3013,7 @@ export default function PDFViewer({
     const container = pdfContainerRef.current;
     if (container) {
       container.style.transform = `translate(${panOffset.x}px, ${panOffset.y}px)`;
-      container.style.transformOrigin = '0 0';
+      container.style.transformOrigin = "0 0";
     }
   }, [panOffset]);
 
@@ -1872,13 +3100,13 @@ export default function PDFViewer({
           <span className="text-sm text-muted-foreground">
             {Math.round(viewport.zoom * 100)}%
           </span>
-          <button
+          {/* <button
             onClick={rotateDocument}
             className="p-2 rounded-md hover:bg-muted transition-colors"
             title="Rotate"
           >
             <RotateCw size={20} />
-          </button>
+          </button> */}
         </div>
       </div>
 
@@ -1902,7 +3130,9 @@ export default function PDFViewer({
             <div className="text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
               <p className="text-muted-foreground">Loading PDF...</p>
-              <p className="text-xs text-muted-foreground mt-2">Please wait before drawing</p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Please wait before drawing
+              </p>
             </div>
           </div>
         ) : !pdfDoc ? (
@@ -1915,7 +3145,11 @@ export default function PDFViewer({
         ) : (
           <div className="p-4 flex justify-center items-start">
             {documentUrl ? (
-              <div id="pdfContainer" ref={pdfContainerRef} className="relative inline-block">
+              <div
+                id="pdfContainer"
+                ref={pdfContainerRef}
+                className="relative inline-block"
+              >
                 <canvas
                   ref={canvasRef}
                   id="pdfCanvas"
@@ -1948,9 +3182,11 @@ export default function PDFViewer({
           <div className="text-sm">
             <div className="font-bold">ARC Command</div>
             <div className="text-xs mt-1">
-              {arcPhase === 'center' ? 'Specify center point of arc:' :
-                arcPhase === 'end' ? 'Specify end point of arc:' :
-                'Specify start point of arc:'}
+              {arcPhase === "center"
+                ? "Specify center point of arc:"
+                : arcPhase === "end"
+                ? "Specify end point of arc:"
+                : "Specify start point of arc:"}
             </div>
             <div className="text-xs text-blue-200 mt-1">
               Press ESC to cancel
@@ -1961,12 +3197,3 @@ export default function PDFViewer({
     </div>
   );
 }
-
-
-
-
-
-
-
-
-

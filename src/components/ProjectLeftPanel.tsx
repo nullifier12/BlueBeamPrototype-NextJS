@@ -273,7 +273,9 @@ export default function ProjectLeftPanel({
         </div>
 
         {/* Project Notes Section - Collaborative Messaging Style */}
-        <ProjectNotes projectId={projectId} currentUser={currentUser} />
+        {projectId && projectId.trim() !== "" && (
+          <ProjectNotes projectId={projectId} currentUser={currentUser} />
+        )}
 
       </div>
     </div>
