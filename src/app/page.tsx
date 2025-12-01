@@ -827,29 +827,46 @@ export default function BlueBeamApp() {
       );
       
       // Update corresponding annotation if it exists (without circular dependency)
+      // Only update annotation if position/page is actually being changed
+      // Preserve full annotation position to avoid losing width/height/other position data
       if (item.annotationId) {
         const relatedAnnotation = annotations.find(
           (ann) => ann.id === item.annotationId
         );
         if (relatedAnnotation) {
-          // Update annotation position and page to match punch item
-          const updatedAnnotation: Annotation = {
-            ...relatedAnnotation,
-            page: item.page || relatedAnnotation.page,
-            position: item.position || relatedAnnotation.position,
-          };
-          // Call API directly to avoid circular dependency
-          try {
-            await api.updateAnnotation(updatedAnnotation.id, updatedAnnotation);
-            setAnnotations((prev) =>
-              prev.map((ann) =>
-                ann.id === updatedAnnotation.id
-                  ? { ...updatedAnnotation, updatedAt: new Date() }
-                  : ann
-              )
-            );
-          } catch (error) {
-            console.error("Error updating annotation from punch item update:", error);
+          // Only update annotation if position or page is explicitly being updated
+          // Preserve all position fields from annotation - punch item position only has {x, y}
+          const shouldUpdateAnnotation = 
+            (item.page !== undefined && item.page !== relatedAnnotation.page) ||
+            (item.position && (
+              item.position.x !== relatedAnnotation.position.x ||
+              item.position.y !== relatedAnnotation.position.y
+            ));
+          
+          if (shouldUpdateAnnotation) {
+            // Merge position carefully - preserve width, height, and other position properties
+            const updatedPosition = item.position 
+              ? { ...relatedAnnotation.position, ...item.position }
+              : relatedAnnotation.position;
+            
+            const updatedAnnotation: Annotation = {
+              ...relatedAnnotation,
+              page: item.page !== undefined ? item.page : relatedAnnotation.page,
+              position: updatedPosition,
+            };
+            // Call API directly to avoid circular dependency
+            try {
+              await api.updateAnnotation(updatedAnnotation.id, updatedAnnotation);
+              setAnnotations((prev) =>
+                prev.map((ann) =>
+                  ann.id === updatedAnnotation.id
+                    ? { ...updatedAnnotation, updatedAt: new Date() }
+                    : ann
+                )
+              );
+            } catch (error) {
+              console.error("Error updating annotation from punch item update:", error);
+            }
           }
         }
       }
