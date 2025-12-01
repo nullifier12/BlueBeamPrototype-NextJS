@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2, Edit } from "lucide-react";
-import { PunchListItem, PunchListSummary } from "@/types";
+import { PunchListItem, PunchListSummary, User } from "@/types";
+import * as api from "@/lib/api";
 
 interface PunchListPanelProps {
   punchItems: PunchListItem[];
@@ -8,6 +9,8 @@ interface PunchListPanelProps {
   onPunchItemUpdate: (item: PunchListItem) => void;
   onPunchItemDelete: (id: string) => void;
   onDemarcationClick?: (item: PunchListItem) => void;
+  projectId?: string;
+  currentUser?: User | null;
 }
 
 export default function PunchListPanel({
@@ -16,9 +19,20 @@ export default function PunchListPanel({
   onPunchItemUpdate,
   onPunchItemDelete,
   onDemarcationClick,
+  projectId,
+  currentUser,
 }: PunchListPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [newItemDescription, setNewItemDescription] = useState("");
+  const [projectUsers, setProjectUsers] = useState<User[]>([]);
+  const [mentionState, setMentionState] = useState<{
+    itemId: string;
+    showMentionList: boolean;
+    mentionQuery: string;
+    mentionPosition: number;
+  } | null>(null);
+  const mentionListRef = useRef<HTMLDivElement>(null);
+  const assigneeInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
 
   const punchListSummary: PunchListSummary = {
     total: punchItems.length,
@@ -75,12 +89,30 @@ export default function PunchListPanel({
     }
   }, [punchItems, onPunchItemUpdate]);
 
-  const handleAssignedToChange = useCallback((id: string, newAssignedTo: string) => {
+  // Handle assignee input with mention detection
+  const handleAssignedToChange = useCallback((id: string, value: string, cursorPos?: number) => {
     const item = punchItems.find(p => p.id === id);
     if (item) {
-      onPunchItemUpdate({ ...item, assignedTo: newAssignedTo });
+      onPunchItemUpdate({ ...item, assignedTo: value });
     }
-  }, [punchItems, onPunchItemUpdate]);
+
+    // Check for @ mention
+    const textBeforeCursor = value.substring(0, cursorPos ?? value.length);
+    const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+
+    if (mentionMatch) {
+      setMentionState({
+        itemId: id,
+        showMentionList: true,
+        mentionQuery: mentionMatch[1],
+        mentionPosition: cursorPos ?? value.length,
+      });
+    } else {
+      if (mentionState?.itemId === id) {
+        setMentionState(null);
+      }
+    }
+  }, [punchItems, onPunchItemUpdate, mentionState]);
 
   const handleCommentsChange = useCallback((id: string, newComments: string) => {
     const item = punchItems.find(p => p.id === id);
@@ -94,6 +126,76 @@ export default function PunchListPanel({
       onPunchItemDelete(id);
     }
   }, [onPunchItemDelete]);
+
+  // Load project users for mentions
+  const loadProjectUsers = useCallback(async () => {
+    if (!projectId || projectId.trim() === "") {
+      setProjectUsers([]);
+      return;
+    }
+    try {
+      const data = await api.getProjectUsers(projectId);
+      setProjectUsers(data.users);
+    } catch (error) {
+      // Only log unexpected errors (not "Project not found")
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.toLowerCase().includes("project not found")) {
+        console.error("Error loading project users:", error);
+      }
+      setProjectUsers([]);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (projectId) {
+      loadProjectUsers();
+    }
+  }, [projectId, loadProjectUsers]);
+
+  // Handle mention selection
+  const handleMentionSelect = useCallback((user: User, itemId: string) => {
+    const item = punchItems.find(p => p.id === itemId);
+    if (!item) return;
+
+    const currentValue = item.assignedTo || "";
+    const mentionStateForItem = mentionState?.itemId === itemId ? mentionState : null;
+
+    if (mentionStateForItem) {
+      const textBeforeMention = currentValue.substring(
+        0,
+        mentionStateForItem.mentionPosition - mentionStateForItem.mentionQuery.length - 1
+      );
+      const textAfterMention = currentValue.substring(mentionStateForItem.mentionPosition);
+      const newValue = `${textBeforeMention}@${user.username} ${textAfterMention}`;
+
+      onPunchItemUpdate({ ...item, assignedTo: newValue });
+      setMentionState(null);
+
+      // Focus back to input and set cursor position
+      setTimeout(() => {
+        const inputRef = assigneeInputRefs.current[itemId];
+        if (inputRef) {
+          const newCursorPos = textBeforeMention.length + user.username.length + 2; // +2 for @ and space
+          inputRef.focus();
+          inputRef.setSelectionRange(newCursorPos, newCursorPos);
+        }
+      }, 0);
+    } else {
+      // If no mention state, just append the mention
+      const newValue = currentValue.trim() ? `${currentValue} @${user.username} ` : `@${user.username} `;
+      onPunchItemUpdate({ ...item, assignedTo: newValue });
+      setMentionState(null);
+    }
+  }, [punchItems, onPunchItemUpdate, mentionState]);
+
+  // Filter users for mention autocomplete
+  const getFilteredUsers = useCallback((query: string) => {
+    return projectUsers.filter(
+      (user) =>
+        user.username.toLowerCase().includes(query.toLowerCase()) ||
+        user.name.toLowerCase().includes(query.toLowerCase())
+    );
+  }, [projectUsers]);
 
   return (
     <div className={`fixed bottom-0 left-0 right-0 bg-background border-t-2 border-border rounded-t-lg shadow-lg z-50 flex flex-col transition-all duration-300 ${
@@ -259,14 +361,66 @@ export default function PunchListPanel({
                             }`}
                           />
                         </td>
-                        <td className="border border-border p-2">
+                        <td className="border border-border p-2 relative">
                           <input
+                            ref={(el) => {
+                              assigneeInputRefs.current[item.id] = el;
+                            }}
                             type="text"
                             value={item.assignedTo}
-                            onChange={(e) => handleAssignedToChange(item.id, e.target.value)}
-                            placeholder="Assignee"
+                            onChange={(e) => {
+                              const cursorPos = e.target.selectionStart;
+                              handleAssignedToChange(item.id, e.target.value, cursorPos);
+                            }}
+                            onKeyDown={(e) => {
+                              // Handle ArrowDown to navigate mention list
+                              if (e.key === "ArrowDown" && mentionState?.itemId === item.id && mentionState.showMentionList) {
+                                e.preventDefault();
+                                const filteredUsers = getFilteredUsers(mentionState.mentionQuery);
+                                if (filteredUsers.length > 0 && mentionListRef.current) {
+                                  const firstOption = mentionListRef.current.querySelector("button") as HTMLButtonElement;
+                                  firstOption?.focus();
+                                }
+                              }
+                            }}
+                            placeholder="@Assignee"
                             className="w-full px-2 py-1 text-xs border border-border rounded bg-input focus:outline-none focus:ring-1 focus:ring-primary"
                           />
+                          {/* Mention Autocomplete Dropdown */}
+                          {mentionState?.itemId === item.id && mentionState.showMentionList && (
+                            <div
+                              ref={mentionListRef}
+                              className="absolute z-50 bottom-full left-0 right-0 mb-1 bg-background border border-border rounded-md shadow-lg max-h-48 overflow-y-auto"
+                            >
+                              {getFilteredUsers(mentionState.mentionQuery).length > 0 ? (
+                                getFilteredUsers(mentionState.mentionQuery).map((user) => (
+                                  <button
+                                    key={user.id}
+                                    onClick={() => handleMentionSelect(user, item.id)}
+                                    className="w-full px-3 py-2 text-left hover:bg-muted flex items-center gap-2 text-sm"
+                                    type="button"
+                                  >
+                                    <div
+                                      className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-semibold"
+                                      style={{ backgroundColor: user.color || "#0066cc" }}
+                                    >
+                                      {user.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div>
+                                      <div className="font-medium">{user.name}</div>
+                                      <div className="text-xs text-muted-foreground">
+                                        @{user.username}
+                                      </div>
+                                    </div>
+                                  </button>
+                                ))
+                              ) : (
+                                <div className="px-3 py-2 text-sm text-muted-foreground">
+                                  No users found
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="border border-border p-2">
                           <textarea

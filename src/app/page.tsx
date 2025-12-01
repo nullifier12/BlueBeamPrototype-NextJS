@@ -1753,6 +1753,8 @@ export default function BlueBeamApp() {
         onPunchItemCreate={handlePunchItemCreate}
         onPunchItemUpdate={handlePunchItemUpdate}
         onPunchItemDelete={handlePunchItemDelete}
+        projectId={currentProjectId || projectId}
+        currentUser={currentUser}
         onDemarcationClick={(item) => {
           // Navigate to annotation if it has an annotationId
           if (item.annotationId) {

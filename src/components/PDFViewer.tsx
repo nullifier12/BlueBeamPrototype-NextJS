@@ -898,6 +898,12 @@ export default function PDFViewer({
       }
     }
   }, []);
+  // Use ref to store annotations to avoid unnecessary re-renders
+  const annotationsRef = useRef(annotations);
+  useEffect(() => {
+    annotationsRef.current = annotations;
+  }, [annotations]);
+
   const redrawAnnotations = useCallback(() => {
     if (!svgOverlayRef.current) return;
 
@@ -906,8 +912,8 @@ export default function PDFViewer({
       svgOverlayRef.current.removeChild(svgOverlayRef.current.firstChild);
     }
 
-    // Draw annotations for current page
-    const pageAnnotations = annotations.filter(
+    // Draw annotations for current page - use ref to get latest annotations
+    const pageAnnotations = annotationsRef.current.filter(
       (ann) => ann.page === viewport.page
     );
 
@@ -924,7 +930,7 @@ export default function PDFViewer({
         svgOverlayRef.current?.appendChild(element);
       }
     });
-  }, [annotations, viewport.page, createAnnotationElement, localDraggedAnnotation]);
+  }, [viewport.page, createAnnotationElement, localDraggedAnnotation]);
   // Render PDF page to canvas
   const renderPage = useCallback(
     async (pageNum: number) => {
@@ -1088,7 +1094,7 @@ export default function PDFViewer({
         renderOperationRef.current = null; // Clear reference on actual error
       }
     },
-    [pdfDoc, viewport.zoom, redrawAnnotations]
+    [pdfDoc, viewport.zoom]
   );
 
   // Debounced render function to prevent too many rapid renders
@@ -1147,10 +1153,10 @@ export default function PDFViewer({
   
   // Re-render annotations when blinking state changes
   useEffect(() => {
-    if (isBlinking) {
+    if (isBlinking && pdfDoc && svgOverlayRef.current) {
       redrawAnnotations();
     }
-  }, [isBlinking, redrawAnnotations]);
+  }, [isBlinking, pdfDoc, redrawAnnotations]);
 
   // Cleanup timeout and render operations on unmount
   useEffect(() => {
@@ -1165,6 +1171,9 @@ export default function PDFViewer({
         renderOperationRef.current.cancel();
         renderOperationRef.current = null;
       }
+      if (annotationRedrawTimeoutRef.current) {
+        clearTimeout(annotationRedrawTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -1172,23 +1181,36 @@ export default function PDFViewer({
 
   // Redraw annotations on SVG overlay
 
-  // Redraw annotations when annotations array changes
+  // Redraw annotations when annotations array changes (debounced to prevent flickering)
+  const annotationRedrawTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (pdfDoc && svgOverlayRef.current) {
-      redrawAnnotations();
+      // Clear any pending redraw
+      if (annotationRedrawTimeoutRef.current) {
+        clearTimeout(annotationRedrawTimeoutRef.current);
+      }
+      // Debounce annotation redraw to prevent flickering
+      annotationRedrawTimeoutRef.current = setTimeout(() => {
+        redrawAnnotations();
+      }, 50);
     }
+    return () => {
+      if (annotationRedrawTimeoutRef.current) {
+        clearTimeout(annotationRedrawTimeoutRef.current);
+      }
+    };
   }, [annotations, pdfDoc, redrawAnnotations]);
 
   // Redraw annotations when zoom level changes
   useEffect(() => {
-    if (pdfDoc && svgOverlayRef.current && annotations.length > 0) {
+    if (pdfDoc && svgOverlayRef.current && annotationsRef.current.length > 0) {
       console.log(
         "🔄 Zoom changed, redrawing annotations at zoom:",
         viewport.zoom
       );
       redrawAnnotations();
     }
-  }, [viewport.zoom, pdfDoc, redrawAnnotations, annotations.length]);
+  }, [viewport.zoom, pdfDoc, redrawAnnotations]);
 
   // Show arc drawing indicators (AutoCAD style)
   useEffect(() => {
