@@ -1305,28 +1305,37 @@ export default function BlueBeamApp() {
               case "arrow":
               case "measurement":
               case "calibrate":
+                // For lines, position.x/y are start point (x1, y1)
+                // position.width/height are end point (x2, y2), NOT width/height!
+                const x1 = annotation.position.x * scale;
+                const y1 = annotation.position.y * scale;
+                const x2 = (annotation.position.width || annotation.position.x) * scale;
+                const y2 = (annotation.position.height || annotation.position.y) * scale;
+                
                 const strokeColor = annotation.type === "measurement" ? "#ff6b00" 
                   : annotation.type === "calibrate" ? "red" : "#000";
                 context.strokeStyle = strokeColor;
                 context.lineWidth = 2 * scale;
                 context.beginPath();
-                context.moveTo(x, y);
-                context.lineTo(x + width, y + height);
+                context.moveTo(x1, y1);
+                context.lineTo(x2, y2);
                 context.stroke();
                 // Draw arrowhead for arrow
                 if (annotation.type === "arrow") {
-                  const angle = Math.atan2(height, width);
+                  const dx = x2 - x1;
+                  const dy = y2 - y1;
+                  const angle = Math.atan2(dy, dx);
                   const arrowLength = 10 * scale;
                   context.beginPath();
-                  context.moveTo(x + width, y + height);
+                  context.moveTo(x2, y2);
                   context.lineTo(
-                    x + width - arrowLength * Math.cos(angle - Math.PI / 6),
-                    y + height - arrowLength * Math.sin(angle - Math.PI / 6)
+                    x2 - arrowLength * Math.cos(angle - Math.PI / 6),
+                    y2 - arrowLength * Math.sin(angle - Math.PI / 6)
                   );
-                  context.moveTo(x + width, y + height);
+                  context.moveTo(x2, y2);
                   context.lineTo(
-                    x + width - arrowLength * Math.cos(angle + Math.PI / 6),
-                    y + height - arrowLength * Math.sin(angle + Math.PI / 6)
+                    x2 - arrowLength * Math.cos(angle + Math.PI / 6),
+                    y2 - arrowLength * Math.sin(angle + Math.PI / 6)
                   );
                   context.stroke();
                 }
