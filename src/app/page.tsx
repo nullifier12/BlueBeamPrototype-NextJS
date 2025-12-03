@@ -1375,21 +1375,82 @@ export default function BlueBeamApp() {
                 }
                 break;
               case "arc":
+                context.strokeStyle = "#0b74de";
+                context.lineWidth = 2 * scale;
+                context.beginPath();
+                
+                // Get arc points - use same format as PDFViewer
+                let startPoint: { x: number; y: number } | null = null;
+                let center: { x: number; y: number } | null = null;
+                let endPoint: { x: number; y: number } | null = null;
+                
                 if (annotation.position.points && annotation.position.points.length >= 3) {
-                  context.strokeStyle = "#0b74de";
-                  context.lineWidth = 2 * scale;
-                  const [start, center, end] = annotation.position.points;
-                  const scaledStart = { x: start.x * scale, y: start.y * scale };
-                  const scaledCenter = { x: center.x * scale, y: center.y * scale };
-                  const scaledEnd = { x: end.x * scale, y: end.y * scale };
-                  const startAngle = Math.atan2(scaledStart.y - scaledCenter.y, scaledStart.x - scaledCenter.x);
-                  const endAngle = Math.atan2(scaledEnd.y - scaledCenter.y, scaledEnd.x - scaledCenter.x);
+                  [startPoint, center, endPoint] = annotation.position.points;
+                } else if (annotation.position.startPoint && annotation.position.center && annotation.position.endPoint) {
+                  startPoint = annotation.position.startPoint;
+                  center = annotation.position.center;
+                  endPoint = annotation.position.endPoint;
+                }
+                
+                if (startPoint && center && endPoint) {
+                  // Scale coordinates exactly as PDFViewer does
+                  const scaledStart = {
+                    x: startPoint.x * scale,
+                    y: startPoint.y * scale,
+                  };
+                  const scaledCenter = {
+                    x: center.x * scale,
+                    y: center.y * scale,
+                  };
+                  const scaledEnd = {
+                    x: endPoint.x * scale,
+                    y: endPoint.y * scale,
+                  };
+                  
+                  // Calculate radius (same as PDFViewer)
                   const radius = Math.sqrt(
-                    Math.pow(scaledStart.x - scaledCenter.x, 2) + Math.pow(scaledStart.y - scaledCenter.y, 2)
+                    Math.pow(scaledCenter.x - scaledStart.x, 2) +
+                    Math.pow(scaledCenter.y - scaledStart.y, 2)
                   );
-                  context.beginPath();
-                  context.arc(scaledCenter.x, scaledCenter.y, radius, startAngle, endAngle);
-                  context.stroke();
+                  
+                  // Calculate angles (EXACT same as PDFViewer)
+                  const startAngle = Math.atan2(
+                    scaledStart.y - scaledCenter.y,
+                    scaledStart.x - scaledCenter.x
+                  );
+                  const endAngle = Math.atan2(
+                    scaledEnd.y - scaledCenter.y,
+                    scaledEnd.x - scaledCenter.x
+                  );
+                  
+                  // Calculate angle difference (EXACT same as PDFViewer)
+                  let angleDiff = endAngle - startAngle;
+                  while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                  while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+                  
+                  const largeArcFlag = Math.abs(angleDiff) > Math.PI ? 1 : 0;
+                  const sweepFlag = angleDiff > 0 ? 1 : 0;
+                  
+                  // Use Path2D with SVG path string - this handles large arcs correctly
+                  const pathData = `M ${scaledStart.x} ${scaledStart.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${scaledEnd.x} ${scaledEnd.y}`;
+                  
+                  try {
+                    // Path2D can parse SVG path strings including arcs
+                    const path = new Path2D(pathData);
+                    context.stroke(path);
+                  } catch (e) {
+                    // Fallback: use canvas arc (only handles small arcs)
+                    // If large arc, we need to draw in two parts or use bezier curves
+                    if (largeArcFlag === 1) {
+                      // For large arcs, draw from start to opposite side, then opposite to end
+                      const midAngle = startAngle + Math.PI;
+                      context.arc(scaledCenter.x, scaledCenter.y, radius, startAngle, midAngle, sweepFlag === 0);
+                      context.arc(scaledCenter.x, scaledCenter.y, radius, midAngle, endAngle, sweepFlag === 0);
+                    } else {
+                      context.arc(scaledCenter.x, scaledCenter.y, radius, startAngle, endAngle, sweepFlag === 0);
+                    }
+                    context.stroke();
+                  }
                 }
                 break;
               case "cloud":
