@@ -1304,6 +1304,11 @@ export default function BlueBeamApp() {
                 context.fillRect(x, y, width, height);
                 context.strokeRect(x, y, width, height);
                 break;
+              case "highlight":
+                context.fillStyle = "rgba(255, 255, 0, 0.3)";
+                context.strokeStyle = "none";
+                context.fillRect(x, y, width, height);
+                break;
               case "circle":
                 context.strokeStyle = "#0b74de";
                 context.lineWidth = 2 * scale;
